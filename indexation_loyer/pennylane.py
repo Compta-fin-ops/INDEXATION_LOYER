@@ -65,10 +65,12 @@ def _remplir(gabarit: Any, valeurs: dict[str, Any]) -> Any:
 
 
 def construire_abonnement(bail: Bail, observations: list[Observation], mapping: dict,
-                          aujourdhui: date | None = None) -> Abonnement:
+                          aujourdhui: date | None = None,
+                          decisions: dict[tuple[str, int], str] | None = None) -> Abonnement:
     aujourdhui = aujourdhui or date.today()
     avert: list[str] = []
-    lignes_rev = calculer(bail, table_indices(observations), horizon=bail.date_fin or aujourdhui, aujourdhui=aujourdhui)
+    lignes_rev = calculer(bail, table_indices(observations), horizon=bail.date_fin or aujourdhui, aujourdhui=aujourdhui,
+                          decisions=decisions)
     annuel = loyer_actuel(bail, lignes_rev, aujourdhui)
     n = bail.echeances_par_an
     en_attente = [l for l in lignes_rev if l.statut == "⚠ Indice attendu"]

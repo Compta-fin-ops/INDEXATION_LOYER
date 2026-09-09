@@ -3,6 +3,7 @@
     python -m indexation_loyer fetch-indices [--depuis 2000-Q1] [--fichier export.csv --serie ILC]
     python -m indexation_loyer init "SCI DES HALLES" [--siren 123456789] [--baux baux.csv]
     python -m indexation_loyer refresh "SCI DES HALLES" | --tous
+    python -m indexation_loyer courriers "SCI DES HALLES" [--bail B01] [--marquer]
     python -m indexation_loyer pennylane "SCI DES HALLES" [--push]
     python -m indexation_loyer demo
 """
@@ -18,7 +19,7 @@ from pathlib import Path
 
 from . import insee, pennylane
 from .baux import Bail
-from .workbook import Societe, construire, lire_classeur, rafraichir
+from .workbook import Societe, construire, lire_classeur, lire_indices_classeur, rafraichir
 
 RACINE = Path(__file__).resolve().parent.parent
 DOSSIER_SUIVI = RACINE / "suivi"
@@ -32,13 +33,16 @@ def _slug(s: str) -> str:
 
 
 def chemin_classeur(societe: str, dossier: Path = DOSSIER_SUIVI) -> Path:
+    """Nom de société -> classeur dans `dossier` ; un chemin .xlsx existant est accepté tel quel."""
+    if societe.lower().endswith(".xlsx") and Path(societe).exists():
+        return Path(societe)
     return dossier / f"{_slug(societe)}_indexation_loyers.xlsx"
 
 
 def _lire_baux_csv(chemin: Path) -> list[Bail]:
     """Import initial optionnel : CSV ; avec les mêmes intitulés que la feuille Baux (ou leurs clés python)."""
     alias = {
-        "ID bail": "id", "Local (désignation / adresse)": "local", "Locataire": "locataire", "Type de bail": "type_bail",
+        "ID bail": "id", "Local (désignation / adresse)": "local", "Locataire": "locataire", "Adresse du locataire (courrier)": "adresse_locataire", "Type de bail": "type_bail",
         "Date de prise d'effet": "date_effet", "Durée (ans)": "duree_ans", "Loyer initial annuel HT": "loyer_initial_annuel_ht",
         "Charges annuelles HT": "charges_annuelles_ht", "TVA (%)": "tva_pct", "Périodicité de facturation": "periodicite_facturation",
         "Indice": "indice", "Trimestre indice de base": "trimestre_base", "Périodicité de révision (ans)": "periodicite_revision_ans",
@@ -113,12 +117,26 @@ def cmd_refresh(args) -> int:
     return code
 
 
+def _indices_du_classeur(chemin: Path) -> list:
+    """Indices de la feuille Indices du classeur ; avertit si le cache local est plus récent (refresh à faire)."""
+    observations = lire_indices_classeur(chemin)
+    cache = insee.lire_cache()
+    if cache:
+        recents_cache = insee.dernieres_valeurs(cache)
+        recents_classeur = insee.dernieres_valeurs(observations)
+        retard = [c for c, o in recents_cache.items() if c not in recents_classeur or recents_classeur[c].periode < o.periode]
+        if retard:
+            log.warning("Le cache d'indices est plus récent que le classeur pour %s : lancer `refresh` d'abord.", ", ".join(retard))
+    return observations
+
+
 def cmd_pennylane(args) -> int:
     chemin = chemin_classeur(args.societe, Path(args.dossier))
     societe, baux, _ = lire_classeur(chemin)
-    observations = insee.lire_cache()
+    observations = _indices_du_classeur(chemin)
     mapping = pennylane.charger_mapping()
-    abonnements = [pennylane.construire_abonnement(b, observations, mapping) for b in baux]
+    _, _, saisies = lire_classeur(chemin)
+    abonnements = [pennylane.construire_abonnement(b, observations, mapping, decisions=saisies.decision) for b in baux]
     chemins = pennylane.ecrire_dry_run(abonnements, DOSSIER_OUT, societe.nom)
     for a in abonnements:
         print(f"  {a.bail_id:<10} {a.locataire:<30} {a.corps.get('invoice_lines', [{}])[0].get('raw_currency_unit_price', '?'):>10} HT / échéance"
@@ -131,6 +149,27 @@ def cmd_pennylane(args) -> int:
             return 1
         for bail_id, statut, corps in pennylane.envoyer(abonnements, mapping, token):
             print(f"  {bail_id}: HTTP {statut} {corps[:200]}")
+    return 0
+
+
+def cmd_courriers(args) -> int:
+    from . import courriers
+    chemin = chemin_classeur(args.societe, Path(args.dossier))
+    societe, baux, saisies = lire_classeur(chemin)
+    observations = _indices_du_classeur(chemin)
+    dossier_sortie = Path(args.sortie) if args.sortie else DOSSIER_OUT / "courriers" / _slug(societe.nom)
+    cibles = courriers.selectionner(baux, observations, saisies, horizon_jours=args.horizon_jours,
+                                    bail_id=args.bail, tous=args.tous)
+    if not cibles:
+        print("Aucune échéance à notifier (utiliser --tous pour régénérer les courriers déjà envoyés, --horizon-jours pour élargir).")
+        return 0
+    chemins = courriers.generer(societe, cibles, dossier_sortie)
+    for (b, l), ch in zip(cibles, chemins):
+        print(f"  {b.id:<6} {b.locataire:<30} révision du {l.echeance.date_revision:%d/%m/%Y}  {l.statut:<22} -> {ch.name}")
+    print(f"{len(chemins)} courrier(s) PDF dans {dossier_sortie}")
+    if args.marquer:
+        n = courriers.marquer_envoyes(chemin, cibles)
+        print(f"Date du jour inscrite dans « Courrier envoyé le » pour {n} échéance(s) (sauvegarde .bak créée).")
     return 0
 
 
@@ -174,6 +213,16 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--push", action="store_true")
     pl.add_argument("--dossier", default=str(DOSSIER_SUIVI))
     pl.set_defaults(func=cmd_pennylane)
+
+    co = sp.add_parser("courriers", help="Génère les courriers PDF d'information des locataires (application ou gel)")
+    co.add_argument("societe")
+    co.add_argument("--bail", help="Limiter à un ID bail")
+    co.add_argument("--horizon-jours", type=int, default=120, help="Inclure les révisions à venir dans ce délai (défaut 120)")
+    co.add_argument("--tous", action="store_true", help="Inclure les échéances déjà notifiées ou appliquées")
+    co.add_argument("--marquer", action="store_true", help="Inscrire la date du jour dans « Courrier envoyé le »")
+    co.add_argument("--sortie", help="Dossier de sortie (défaut out/courriers/<société>)")
+    co.add_argument("--dossier", default=str(DOSSIER_SUIVI))
+    co.set_defaults(func=cmd_courriers)
 
     d = sp.add_parser("demo", help="Génère un classeur de démonstration à valeurs fictives")
     d.add_argument("--dossier")

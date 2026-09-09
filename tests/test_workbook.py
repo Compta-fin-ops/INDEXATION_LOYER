@@ -11,7 +11,7 @@ from openpyxl import load_workbook
 
 from indexation_loyer import calcul, demo
 from indexation_loyer.baux import Bail
-from indexation_loyer.workbook import (COLS_BAUX, R, A, P, Societe, construire, lire_classeur, rafraichir)
+from indexation_loyer.workbook import (COLS_BAUX, R, A, P, B_LOYER, Societe, construire, lire_classeur, rafraichir)
 
 AUJOURDHUI = date(2026, 9, 9)
 
@@ -32,7 +32,7 @@ def test_structure(classeur_demo):
     ids = [ws_r[f"A{r}"].value for r in range(2, ws_r.max_row + 1)]
     assert ids.count("B01") == 9 and ids.count("B02") == 3
     assert ws_r[f"{R['Statut']}2"].value.startswith("=IF(")
-    assert "_xlfn.MAXIFS" in wb["Alertes"][f"{A['N° dernière révision calculable']}2"].value
+    assert "_xlfn.MAXIFS" in wb["Alertes"][f"{A['N° dernière révision effective']}2"].value
 
 
 def test_lire_puis_rafraichir_conserve_saisies(classeur_demo, tmp_path):
@@ -42,20 +42,23 @@ def test_lire_puis_rafraichir_conserve_saisies(classeur_demo, tmp_path):
     ws = wb["Révisions"]
     ws[f"{R['Appliqué ? (Oui/Non)']}2"] = "Oui"
     ws[f"{R['Commentaire']}2"] = "Facturé le 05/04/2022"
-    wb["Baux"]["H2"] = 25000  # modification du loyer initial de B01
+    wb["Baux"][f"{B_LOYER}2"] = 25000  # modification du loyer initial de B01
     wb.save(copie)
 
     societe, baux, saisies = lire_classeur(copie)
     assert societe.demo and len(baux) == 4
     assert baux[0].loyer_initial_annuel_ht == 25000
     assert saisies.applique[("B01", 1)] == "Oui"
+    assert saisies.decision[("B01", 4)] == "Geler – sans rattrapage"      # saisie de la démo relue
+    assert saisies.consigne[("B03", 6)].startswith("Gel d'un an")
 
     rafraichir(copie, demo.indices_fictifs(AUJOURDHUI), aujourdhui=AUJOURDHUI)
     wb2 = load_workbook(copie)
     ws2 = wb2["Révisions"]
     assert ws2[f"{R['Appliqué ? (Oui/Non)']}2"].value == "Oui"
     assert ws2[f"{R['Commentaire']}2"].value == "Facturé le 05/04/2022"
-    assert wb2["Baux"]["H2"].value == 25000
+    assert ws2[f"{R['Décision']}5"].value == "Geler – sans rattrapage"   # B01 n°4 conservée
+    assert wb2["Baux"][f"{B_LOYER}2"].value == 25000
     assert list(tmp_path.glob("copie.*.bak.xlsx"))  # sauvegarde créée
 
 
@@ -95,10 +98,11 @@ def test_parite_libreoffice_moteur_python(classeur_demo, tmp_path):
 
     # 2. Révisions : loyer retenu / statut identiques au moteur Python
     indices = calcul.table_indices(demo.indices_fictifs(AUJOURDHUI))
+    decisions = demo.saisies_fictives().decision
     attendu = {}
     baux = demo.baux_fictifs()
     for b in baux:
-        for l in calcul.calculer(b, indices, horizon=b.date_fin, aujourdhui=AUJOURDHUI):
+        for l in calcul.calculer(b, indices, horizon=b.date_fin, aujourdhui=AUJOURDHUI, decisions=decisions):
             attendu[(b.id, l.echeance.numero)] = l
     ws = wb["Révisions"]
     n = 0
@@ -110,6 +114,7 @@ def test_parite_libreoffice_moteur_python(classeur_demo, tmp_path):
         if l.loyer_retenu is not None:
             assert abs(retenu - l.loyer_retenu) < 0.005, cle
         assert ws[f"{R['Statut']}{r}"].value == l.statut, cle
+        assert ws[f"{R['Trim. précédent']}{r}"].value == l.trimestre_precedent_effectif, cle
         assert ws[f"{R['Date de révision']}{r}"].value.date() == l.echeance.date_revision
         n += 1
     assert n == len(attendu) == 30
@@ -118,8 +123,12 @@ def test_parite_libreoffice_moteur_python(classeur_demo, tmp_path):
     ws_a = wb["Alertes"]
     for r in range(2, ws_a.max_row + 1):
         b = next(b for b in baux if b.id == ws_a[f"A{r}"].value)
-        lignes = calcul.calculer(b, indices, horizon=b.date_fin, aujourdhui=AUJOURDHUI)
+        lignes = calcul.calculer(b, indices, horizon=b.date_fin, aujourdhui=AUJOURDHUI, decisions=decisions)
         assert abs(ws_a[f"{A['Loyer actuel (annuel HT)']}{r}"].value - calcul.loyer_actuel(b, lignes, AUJOURDHUI)) < 0.005
+    assert ws_a[f"{A['Révisions gelées']}2"].value == 1                      # B01
+    assert ws_a[f"{A['Consigne prochaine révision']}4"].value in (None, "")          # B03 : prochaine = n°8, sans consigne
+    # B03 : n°7 est la dernière effective ; la consigne affichée en Révisions n°7 est celle du rattrapage
+    assert ws[f"{R['Consigne (à faire)']}{[r for r in range(2, ws.max_row + 1) if ws[f'A{r}'].value == 'B03' and ws[f'{R[chr(78) + chr(176)]}{r}'].value == 7][0]}"].value.startswith("Appliquer le rattrapage")
     # B01 : la révision 2027-04-01 n'est pas encore publiée
     assert ws_a[f"{A['Indice publié ?']}2"].value == "Non"
     assert ws_a[f"{A['Trimestre attendu']}2"].value == "2026-T4"
@@ -131,4 +140,4 @@ def test_parite_libreoffice_moteur_python(classeur_demo, tmp_path):
     corps = json.loads(ws_p[f"{P['Aperçu du corps JSON (POST /billing_subscriptions)']}2"].value)
     assert corps["customer_id"] == 100001 and corps["recurrence"]["type"] == "monthly"
     assert len(corps["invoice_lines"]) == 2  # loyer + charges
-    assert abs(corps["invoice_lines"][0]["raw_currency_unit_price"] - calcul.loyer_actuel(baux[0], calcul.calculer(baux[0], indices, baux[0].date_fin, AUJOURDHUI), AUJOURDHUI) / 12) < 0.01
+    assert abs(corps["invoice_lines"][0]["raw_currency_unit_price"] - calcul.loyer_actuel(baux[0], calcul.calculer(baux[0], indices, baux[0].date_fin, AUJOURDHUI, decisions), AUJOURDHUI) / 12) < 0.01

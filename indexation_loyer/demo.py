@@ -11,7 +11,8 @@ from pathlib import Path
 from .baux import Bail
 from .insee import Observation
 from .periodes import Trimestre
-from .workbook import Societe, construire
+from .baux import DECISION_GEL_RATTRAPAGE, DECISION_GEL_SANS
+from .workbook import Saisies, Societe, construire
 
 
 def indices_fictifs(aujourdhui: date) -> list[Observation]:
@@ -34,6 +35,7 @@ def indices_fictifs(aujourdhui: date) -> list[Observation]:
 def baux_fictifs() -> list[Bail]:
     return [
         Bail(id="B01", local="Boutique 12 rue de la Paix", locataire="Boulangerie Dupont SAS", date_effet=date(2021, 4, 1),
+             adresse_locataire="12 rue de la Paix\n75002 Paris",
              loyer_initial_annuel_ht=24000, charges_annuelles_ht=2400, indice="ILC", trimestre_base="2020-T4",
              periodicite_revision_ans=1, methode="Chaînée", periodicite_facturation="Mensuelle",
              pennylane_customer_id="100001", notes="Clause d'échelle mobile annuelle, ILC même trimestre"),
@@ -51,9 +53,27 @@ def baux_fictifs() -> list[Bail]:
     ]
 
 
+def saisies_fictives() -> Saisies:
+    s = Saisies()
+    # B01 : le client renonce à la hausse 2025 (locataire en difficulté) sans rattrapage
+    s.decision[("B01", 4)] = DECISION_GEL_SANS
+    s.consigne[("B01", 4)] = "Gel décidé par la gérance le 12/03/2025 (difficultés du preneur). Ne pas facturer la hausse. Courrier d'information envoyé."
+    s.applique[("B01", 1)] = s.applique[("B01", 2)] = s.applique[("B01", 3)] = "Oui"
+    s.date_application[("B01", 3)] = date(2024, 4, 1)
+    s.courrier[("B01", 4)] = date(2025, 3, 20)
+    # B03 : gel négocié un an avec rattrapage à la révision suivante
+    s.decision[("B03", 6)] = DECISION_GEL_RATTRAPAGE
+    s.consigne[("B03", 6)] = "Gel d'un an négocié (avenant du 10/01/2025), rattrapage à la révision 2026 : recalculer sur l'indice 2023-T3."
+    for n in range(1, 6):
+        s.applique[("B03", n)] = "Oui"
+    s.consigne[("B03", 7)] = "Appliquer le rattrapage : coefficient calculé sur 2 ans d'indice. Prévenir le locataire avant facturation."
+    return s
+
+
 def generer_demo(dossier: Path, aujourdhui: date | None = None) -> Path:
     aujourdhui = aujourdhui or date.today()
     societe = Societe(nom="SCI EXEMPLE (DÉMO)", siren="000000000", forme="SCI", demo=True,
-                      contact="cabinet – démonstration")
+                      contact="cabinet – démonstration", adresse="1 place de la Bourse\n75002 Paris",
+                      signataire="Mme Claire Exemple", qualite_signataire="Gérante", ville_signature="Paris")
     chemin = dossier / "DEMO_SCI_EXEMPLE_valeurs_fictives.xlsx"
-    return construire(societe, baux_fictifs(), indices_fictifs(aujourdhui), chemin, aujourdhui=aujourdhui)
+    return construire(societe, baux_fictifs(), indices_fictifs(aujourdhui), chemin, saisies=saisies_fictives(), aujourdhui=aujourdhui)

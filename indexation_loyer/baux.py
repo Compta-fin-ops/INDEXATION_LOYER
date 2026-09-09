@@ -19,6 +19,16 @@ TYPES_BAIL = ("Commercial", "Professionnel", "Habitation", "Dérogatoire", "Autr
 PERIODICITES_FACTURATION = {"Mensuelle": 12, "Trimestrielle": 4, "Semestrielle": 2, "Annuelle": 1}
 METHODES = ("Chaînée", "Base fixe")
 
+# Décision du bailleur sur une échéance donnée (saisie dans la feuille Révisions).
+DECISION_APPLIQUER = "Appliquer"
+DECISION_GEL_SANS = "Geler – sans rattrapage"       # l'indice avance, la hausse de l'année est abandonnée
+DECISION_GEL_RATTRAPAGE = "Geler – rattrapage possible"  # l'indice de départ reste celui de la dernière révision appliquée
+DECISIONS = (DECISION_APPLIQUER, DECISION_GEL_SANS, DECISION_GEL_RATTRAPAGE)
+
+
+def est_gel(decision: str | None) -> bool:
+    return bool(decision) and str(decision).strip().startswith("Geler")
+
 
 @dataclass
 class Bail:
@@ -27,6 +37,7 @@ class Bail:
     locataire: str
     date_effet: date
     loyer_initial_annuel_ht: float
+    adresse_locataire: str = ""          # adresse de correspondance pour les courriers (défaut : le local)
     indice: str = "ILC"
     trimestre_base: str = ""             # ex. 2023-T2 ; vide -> déduit de date_effet (T-2)
     periodicite_revision_ans: int = 1    # 1 = annuelle (clause d'échelle mobile), 3 = triennale
@@ -62,6 +73,10 @@ class Bail:
             self.erreurs.append(str(e))
         if self.date_fin is None and self.duree_ans:
             self.date_fin = _ajouter_annees(self.date_effet, self.duree_ans)
+
+    @property
+    def adresse_courrier(self) -> str:
+        return self.adresse_locataire or self.local
 
     @property
     def echeances_par_an(self) -> int:

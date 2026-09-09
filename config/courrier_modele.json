@@ -1,0 +1,26 @@
+{
+  "_commentaire": "Modèle des courriers d'information aux locataires. Jetons disponibles : {locataire} {local} {indice} {indice_libelle} {trimestre_reference} {valeur_reference} {trimestre_precedent} {valeur_precedente} {coefficient} {loyer_precedent_annuel} {loyer_nouveau_annuel} {loyer_precedent_echeance} {loyer_nouveau_echeance} {periodicite} {variation_pct} {date_revision} {date_effet_bail} {plafond} {bailleur} {signataire} {qualite}. Les montants sont HT. Adapter la formule de politesse et la référence à la clause du bail.",
+  "objet_application": "Révision du loyer – {local}",
+  "objet_gel": "Loyer {local} – information sur la révision au {date_revision}",
+  "objet_attente": "Loyer {local} – révision au {date_revision} en attente de publication de l'indice",
+  "intro": "Madame, Monsieur,",
+  "application": [
+    "Conformément à la clause d'indexation du bail portant sur les locaux désignés ci-dessus, le loyer est révisé à la date anniversaire du {date_revision} en fonction de la variation de l'{indice_libelle} publié par l'INSEE.",
+    "L'indice de référence pour cette révision est celui du {trimestre_reference} ({valeur_reference}), à comparer à l'indice du {trimestre_precedent} ({valeur_precedente}), soit un coefficient de {coefficient}.",
+    "Le loyer annuel hors taxes passe ainsi de {loyer_precedent_annuel} à {loyer_nouveau_annuel} ({variation_pct}), soit un loyer {periodicite} hors taxes de {loyer_nouveau_echeance} au lieu de {loyer_precedent_echeance}, hors charges et taxes applicables.",
+    "Le nouveau loyer sera appliqué à compter de l'échéance suivant le {date_revision} ; le cas échéant, le rappel dû depuis cette date figurera sur la prochaine facture."
+  ],
+  "application_plafond": "En application du plafond de {plafond} prévu, le loyer retenu est limité à {loyer_nouveau_annuel} hors taxes par an.",
+  "gel": [
+    "Conformément à la clause d'indexation du bail portant sur les locaux désignés ci-dessus, le loyer aurait dû être révisé à la date anniversaire du {date_revision} en fonction de la variation de l'{indice_libelle} ({trimestre_reference} : {valeur_reference}, contre {valeur_precedente} au {trimestre_precedent}).",
+    "Nous vous informons que le bailleur a décidé de ne pas appliquer cette révision. Votre loyer annuel hors taxes est maintenu à {loyer_precedent_annuel}, soit {loyer_precedent_echeance} par échéance {periodicite}, jusqu'à la prochaine échéance de révision.",
+    "Cette décision est consentie à titre exceptionnel et sans renonciation aux stipulations du bail pour l'avenir."
+  ],
+  "gel_rattrapage": "La variation de l'indice non appliquée cette année pourra être prise en compte lors de la prochaine révision, conformément aux stipulations du bail.",
+  "attente": [
+    "Conformément à la clause d'indexation du bail portant sur les locaux désignés ci-dessus, le loyer est révisé à la date anniversaire du {date_revision} en fonction de la variation de l'{indice_libelle}.",
+    "L'indice du {trimestre_reference} n'ayant pas encore été publié par l'INSEE, le loyer actuel de {loyer_precedent_echeance} hors taxes par échéance {periodicite} continue d'être facturé à titre provisoire. Le nouveau loyer et le rappel correspondant vous seront notifiés dès publication."
+  ],
+  "cloture": "Nous restons à votre disposition pour tout renseignement et vous prions d'agréer, Madame, Monsieur, l'expression de nos salutations distinguées.",
+  "mention_bas_de_page": "Courrier généré par le suivi des indexations du cabinet – indices INSEE série {indice} (idbank {idbank}). Document d'information ; seules les stipulations du bail font foi."
+}

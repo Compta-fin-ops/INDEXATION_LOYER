@@ -29,7 +29,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
 from . import __version__
-from .baux import INDICES, METHODES, PERIODICITES_FACTURATION, TYPES_BAIL, Bail
+from .baux import DECISIONS, INDICES, METHODES, PERIODICITES_FACTURATION, TYPES_BAIL, Bail
 from .insee import Observation, charger_config, dernieres_valeurs
 
 log = logging.getLogger(__name__)
@@ -61,20 +61,30 @@ class Societe:
     regime_tva: str = "Loyers soumis à TVA sur option (20 %)"
     pennylane_company: str = ""
     contact: str = ""
+    adresse: str = ""                 # adresse du bailleur (en-tête des courriers)
+    signataire: str = ""              # ex. « M. Jean Dupont »
+    qualite_signataire: str = "Gérant"
+    ville_signature: str = ""
     demo: bool = False
 
 
 @dataclass
 class Saisies:
     """Colonnes saisies à la main dans « Révisions », à préserver au rafraîchissement."""
+    decision: dict[tuple[str, int], str] = field(default_factory=dict)       # Appliquer / Geler…
+    consigne: dict[tuple[str, int], str] = field(default_factory=dict)       # ce qu'il faut faire
     applique: dict[tuple[str, int], str] = field(default_factory=dict)
     date_application: dict[tuple[str, int], object] = field(default_factory=dict)
+    courrier: dict[tuple[str, int], object] = field(default_factory=dict)    # date d'envoi du courrier
     commentaire: dict[tuple[str, int], str] = field(default_factory=dict)
+
+    CHAMPS = (("decision", "Décision"), ("consigne", "Consigne (à faire)"), ("applique", "Appliqué ? (Oui/Non)"),
+              ("date_application", "Date d'application"), ("courrier", "Courrier envoyé le"), ("commentaire", "Commentaire"))
 
 
 # --- colonnes de la feuille Baux -----------------------------------------------
 COLS_BAUX = [
-    ("ID bail", 12), ("Local (désignation / adresse)", 34), ("Locataire", 26), ("Type de bail", 14),
+    ("ID bail", 12), ("Local (désignation / adresse)", 34), ("Locataire", 26), ("Adresse du locataire (courrier)", 30), ("Type de bail", 14),
     ("Date de prise d'effet", 14), ("Durée (ans)", 9), ("Date de fin", 14),
     ("Loyer initial annuel HT", 16), ("Charges annuelles HT", 14), ("TVA (%)", 8),
     ("Périodicité de facturation", 16), ("Indice", 8), ("Trimestre indice de base", 14),
@@ -84,6 +94,7 @@ COLS_BAUX = [
 # lettres utiles
 B = {nom: get_column_letter(i + 1) for i, (nom, _) in enumerate(COLS_BAUX)}
 B_ID, B_LOCAL, B_LOCATAIRE, B_TYPE = B["ID bail"], B["Local (désignation / adresse)"], B["Locataire"], B["Type de bail"]
+B_ADRESSE = B["Adresse du locataire (courrier)"]
 B_EFFET, B_DUREE, B_FIN = B["Date de prise d'effet"], B["Durée (ans)"], B["Date de fin"]
 B_LOYER, B_CHARGES, B_TVA = B["Loyer initial annuel HT"], B["Charges annuelles HT"], B["TVA (%)"]
 B_PERFACT, B_INDICE, B_TBASE = B["Périodicité de facturation"], B["Indice"], B["Trimestre indice de base"]
@@ -96,20 +107,21 @@ COLS_INDICES = [("Série", 8), ("Période", 10), ("Valeur", 10), ("Statut obs.",
 COLS_REV = [
     ("ID bail", 10), ("Local", 28), ("N°", 5), ("Date de révision", 13), ("Indice", 7),
     ("Trim. référence", 11), ("Valeur indice réf.", 11), ("Trim. précédent", 11), ("Valeur indice préc.", 11),
-    ("Coefficient", 11), ("Base de calcul (annuel HT)", 15), ("Loyer révisé brut", 14),
+    ("Coefficient", 11), ("Décision", 24), ("Base de calcul (annuel HT)", 15), ("Loyer révisé brut", 14),
     ("Loyer retenu (annuel HT)", 15), ("Loyer précédent (annuel HT)", 15), ("Variation", 9),
     ("Loyer mensuel HT", 13), ("Loyer / échéance HT", 13), ("Charges / échéance HT", 13),
     ("TVA / échéance", 12), ("Total TTC / échéance", 13), ("Statut", 20),
-    ("Appliqué ? (Oui/Non)", 11), ("Date d'application", 13), ("Commentaire", 30), ("Clé", 12),
+    ("Consigne (à faire)", 40), ("Appliqué ? (Oui/Non)", 11), ("Date d'application", 13), ("Courrier envoyé le", 13),
+    ("Commentaire", 30), ("Clé", 12), ("Effectif", 6),
 ]
 R = {nom: get_column_letter(i + 1) for i, (nom, _) in enumerate(COLS_REV)}
 COL_DATE_APPLI = R["Date d'application"]
 
 COLS_ALERTES = [
     ("ID bail", 10), ("Local", 28), ("Locataire", 22), ("Indice", 7), ("Loyer initial annuel HT", 14),
-    ("N° dernière révision calculable", 12), ("Loyer actuel (annuel HT)", 15), ("Loyer actuel mensuel HT", 13),
+    ("N° dernière révision effective", 12), ("Loyer actuel (annuel HT)", 15), ("Loyer actuel mensuel HT", 13),
     ("Prochaine révision", 13), ("Trimestre attendu", 11), ("Indice publié ?", 10),
-    ("Révisions calculables non appliquées", 14), ("Action", 34),
+    ("Révisions calculables non appliquées", 14), ("Révisions gelées", 9), ("Action", 34), ("Consigne prochaine révision", 40),
 ]
 A = {nom: get_column_letter(i + 1) for i, (nom, _) in enumerate(COLS_ALERTES)}
 
@@ -204,7 +216,10 @@ def _feuille_lisezmoi(wb: Workbook, societe: Societe, observations: list[Observa
         "1. Feuille « Baux » : une ligne par local / bail. Seules les cellules jaunes se saisissent. La colonne Contrôles signale les incohérences.",
         "2. Feuille « Indices » : alimentée par la commande  python -m indexation_loyer fetch-indices  puis  refresh <société>. Ne pas saisir ici sauf ligne de source MANUEL.",
         "3. Feuille « Révisions » : calendrier calculé. Statut ✔ Calculable = l'indice est publié et la date de révision est passée : la facturation doit être ajustée.",
-        "   Renseigner « Appliqué ? » et la date d'application une fois la révision facturée : ces colonnes sont conservées au rafraîchissement.",
+        "   Colonne « Décision » : vide ou Appliquer = révision appliquée ; Geler = le client renonce à la révision (loyer inchangé). « Geler – rattrapage possible » permet de récupérer la variation à la révision suivante ; « sans rattrapage » l'abandonne.",
+        "   Colonne « Consigne (à faire) » : instruction libre du dossier (ex. « Gel décidé par le client le 12/03, courrier à envoyer, ne pas facturer »). Reprise dans la feuille Alertes.",
+        "   Renseigner « Appliqué ? », la date d'application et la date d'envoi du courrier : toutes les colonnes jaunes sont conservées au rafraîchissement.",
+        "   Courriers aux locataires : commande  python -m indexation_loyer courriers <société>  -> un PDF par échéance à notifier (application ou gel), modèle dans config/courrier_modele.json.",
         "4. Feuille « Alertes » : vue de pilotage par bail (loyer actuel, prochaine échéance, action).",
         "5. Feuille « Pennylane » : corps de requête prêt pour POST /billing_subscriptions (mode aperçu ; l'envoi se fait par la commande  pennylane <société>).",
         "Trimestres : notation AAAA-Tn (2024-T2 = 2e trimestre 2024), équivalente au 2024-Q2 de l'INSEE.",
@@ -234,7 +249,9 @@ def _feuille_societe(wb: Workbook, s: Societe, aujourdhui: date) -> None:
     ws.column_dimensions["B"].width = 50
     lignes = [("Raison sociale", s.nom), ("SIREN", s.siren), ("Forme", s.forme),
               ("Régime TVA des loyers", s.regime_tva), ("Identifiant société Pennylane", s.pennylane_company),
-              ("Contact cabinet", s.contact), ("Date de génération", aujourdhui), ("Mode démonstration", "OUI" if s.demo else "non")]
+              ("Contact cabinet", s.contact), ("Adresse du bailleur (courriers)", s.adresse), ("Signataire des courriers", s.signataire),
+              ("Qualité du signataire", s.qualite_signataire), ("Ville de signature", s.ville_signature),
+              ("Date de génération", aujourdhui), ("Mode démonstration", "OUI" if s.demo else "non")]
     for i, (k, v) in enumerate(lignes, start=1):
         ws.cell(row=i, column=1, value=k).font = FONT_GRAS
         c = ws.cell(row=i, column=2, value=v)
@@ -249,7 +266,7 @@ def _feuille_baux(wb: Workbook, baux: list[Bail]) -> None:
     _entetes(ws, COLS_BAUX)
     for i, b in enumerate(baux, start=2):
         valeurs = {
-            B_ID: b.id, B_LOCAL: b.local, B_LOCATAIRE: b.locataire, B_TYPE: b.type_bail,
+            B_ID: b.id, B_LOCAL: b.local, B_LOCATAIRE: b.locataire, B_ADRESSE: b.adresse_locataire or None, B_TYPE: b.type_bail,
             B_EFFET: b.date_effet, B_DUREE: b.duree_ans, B_LOYER: b.loyer_initial_annuel_ht,
             B_CHARGES: b.charges_annuelles_ht, B_TVA: b.tva_pct, B_PERFACT: b.periodicite_facturation,
             B_INDICE: b.indice, B_TBASE: b.trimestre_base, B_PERREV: b.periodicite_revision_ans,
@@ -337,16 +354,25 @@ def _feuille_revisions(wb: Workbook, baux: list[Bail], saisies: Saisies, aujourd
         for ech in b.calendrier(horizon):
             _ligne_revision(ws, i, b, ech.numero, premiere)
             cle = (b.id, ech.numero)
-            ws[f"{R['Appliqué ? (Oui/Non)']}{i}"] = saisies.applique.get(cle)
-            ws[f"{COL_DATE_APPLI}{i}"] = saisies.date_application.get(cle)
-            ws[f"{R['Commentaire']}{i}"] = saisies.commentaire.get(cle)
+            for attr, nom in Saisies.CHAMPS:
+                ws[f"{R[nom]}{i}"] = getattr(saisies, attr).get(cle)
             i += 1
     derniere = max(i - 1, 2)
+    col_statut = R["Statut"]
     dv = DataValidation(type="list", formula1='"Oui,Non"', allow_blank=True)
     dv.add(f"{R['Appliqué ? (Oui/Non)']}2:{R['Appliqué ? (Oui/Non)']}{derniere + 500}")
     ws.add_data_validation(dv)
+    dv_dec = DataValidation(type="list", formula1='"' + ",".join(DECISIONS) + '"', allow_blank=True,
+                            promptTitle="Décision du bailleur",
+                            prompt="Vide ou Appliquer = révision appliquée. Geler = loyer inchangé ; "
+                                   "« rattrapage possible » repart de l'indice de la dernière révision appliquée.")
+    dv_dec.showInputMessage = True
+    dv_dec.add(f"{R['Décision']}2:{R['Décision']}{derniere + 500}")
+    ws.add_data_validation(dv_dec)
+    ws.conditional_formatting.add(f"{col_statut}2:{col_statut}{derniere + 500}",
+                                  FormulaRule(formula=[f'LEFT({col_statut}2,1)="❄"'], font=Font(color="1F4E79", bold=True),
+                                              fill=PatternFill("solid", fgColor="DDEBF7")))
     ws.auto_filter.ref = f"A1:{get_column_letter(len(COLS_REV))}{derniere}"
-    col_statut = R["Statut"]
     ws.conditional_formatting.add(f"{col_statut}2:{col_statut}{derniere + 500}",
                                   FormulaRule(formula=[f'LEFT({col_statut}2,1)="⚠"'], font=Font(color="C00000", bold=True),
                                               fill=PatternFill("solid", fgColor="FFC7CE")))
@@ -357,6 +383,7 @@ def _feuille_revisions(wb: Workbook, baux: list[Bail], saisies: Saisies, aujourd
                                   FormulaRule(formula=[f'AND(LEFT({col_statut}2,1)="✔",{R["Appliqué ? (Oui/Non)"]}2="Oui")'],
                                               font=Font(color="006100"), fill=PatternFill("solid", fgColor="C6EFCE")))
     ws.column_dimensions[R["Clé"]].hidden = True
+    ws.column_dimensions[R["Effectif"]].hidden = True
 
 
 def _ligne_revision(ws: Worksheet, i: int, b: Bail, numero: int, premiere: int) -> None:
@@ -379,8 +406,14 @@ def _ligne_revision(ws: Worksheet, i: int, b: Bail, numero: int, premiere: int) 
     ws[c("Trim. référence")] = f'=TEXT(VALUE(LEFT({base_t},4))+{c("N°")}*{p},"0")&RIGHT({base_t},3)'
     ws[c("Valeur indice réf.")] = (f'=IF(SUMIFS(Indices!$C:$C,Indices!$A:$A,{c("Indice")},Indices!$B:$B,{c("Trim. référence")})=0,"",'
                                    f'SUMIFS(Indices!$C:$C,Indices!$A:$A,{c("Indice")},Indices!$B:$B,{c("Trim. référence")}))')
-    ws[c("Trim. précédent")] = (f'=IF({methode}="Base fixe",{base_t},'
-                                f'TEXT(VALUE(LEFT({base_t},4))+({c("N°")}-1)*{p},"0")&RIGHT({base_t},3))')
+    gel = f'LEFT({c("Décision")},5)="Geler"'
+    if numero == 1:
+        ws[c("Trim. précédent")] = f"={base_t}"
+    else:
+        # chaînée : repart de l'indice de référence précédent, sauf gel « rattrapage possible »
+        # (on conserve alors l'indice de départ de l'échéance gelée) ; base fixe : toujours l'indice de base
+        ws[c("Trim. précédent")] = (f'=IF({methode}="Base fixe",{base_t},'
+                                    f'IF({prec("Décision")}="Geler – rattrapage possible",{prec("Trim. précédent")},{prec("Trim. référence")}))')
     ws[c("Valeur indice préc.")] = (f'=IF(SUMIFS(Indices!$C:$C,Indices!$A:$A,{c("Indice")},Indices!$B:$B,{c("Trim. précédent")})=0,"",'
                                     f'SUMIFS(Indices!$C:$C,Indices!$A:$A,{c("Indice")},Indices!$B:$B,{c("Trim. précédent")}))')
     ws[c("Coefficient")] = f'=IF(OR({c("Valeur indice réf.")}="",{c("Valeur indice préc.")}=""),"",{c("Valeur indice réf.")}/{c("Valeur indice préc.")})'
@@ -391,21 +424,26 @@ def _ligne_revision(ws: Worksheet, i: int, b: Bail, numero: int, premiere: int) 
         ws[c("Base de calcul (annuel HT)")] = f'=IF({methode}="Base fixe",{loyer0},{prec("Loyer retenu (annuel HT)")})'
         ws[c("Loyer précédent (annuel HT)")] = f'={prec("Loyer retenu (annuel HT)")}'
     ws[c("Loyer révisé brut")] = f'=IF(OR({c("Coefficient")}="",{c("Base de calcul (annuel HT)")}=""),"",ROUND({c("Base de calcul (annuel HT)")}*{c("Coefficient")},2))'
-    annees_plafond = f'IF({methode}="Base fixe",{c("N°")}*{p},{p})'
-    ws[c("Loyer retenu (annuel HT)")] = (f'=IF({c("Loyer révisé brut")}="","",IF({plafond}="",{c("Loyer révisé brut")},'
-                                         f'MIN({c("Loyer révisé brut")},ROUND({c("Base de calcul (annuel HT)")}*(1+{plafond}/100)^{annees_plafond},2))))')
+    annees_plafond = (f'IF({methode}="Base fixe",{c("N°")}*{p},'
+                      f'VALUE(LEFT({c("Trim. référence")},4))-VALUE(LEFT({c("Trim. précédent")},4)))')
+    ws[c("Loyer retenu (annuel HT)")] = (f'=IF({gel},{c("Loyer précédent (annuel HT)")},'
+                                         f'IF({c("Loyer révisé brut")}="","",IF({plafond}="",{c("Loyer révisé brut")},'
+                                         f'MIN({c("Loyer révisé brut")},ROUND({c("Base de calcul (annuel HT)")}*(1+{plafond}/100)^{annees_plafond},2)))))')
     ws[c("Variation")] = f'=IF(OR({c("Loyer retenu (annuel HT)")}="",{c("Loyer précédent (annuel HT)")}=""),"",{c("Loyer retenu (annuel HT)")}/{c("Loyer précédent (annuel HT)")}-1)'
     ws[c("Loyer mensuel HT")] = f'=IF({c("Loyer retenu (annuel HT)")}="","",{c("Loyer retenu (annuel HT)")}/12)'
     ws[c("Loyer / échéance HT")] = f'=IF({c("Loyer retenu (annuel HT)")}="","",{c("Loyer retenu (annuel HT)")}/{ech_par_an})'
     ws[c("Charges / échéance HT")] = f'=IF({lk(B_CHARGES)}="",0,{lk(B_CHARGES)})/{ech_par_an}'
     ws[c("TVA / échéance")] = f'=IF({c("Loyer / échéance HT")}="","",({c("Loyer / échéance HT")}+{c("Charges / échéance HT")})*{lk(B_TVA)}/100)'
     ws[c("Total TTC / échéance")] = f'=IF({c("Loyer / échéance HT")}="","",{c("Loyer / échéance HT")}+{c("Charges / échéance HT")}+{c("TVA / échéance")})'
-    ws[c("Statut")] = (f'=IF({c("Valeur indice réf.")}="",IF({c("Date de révision")}<=TODAY(),"⚠ Indice attendu","À venir"),'
-                       f'IF({c("Date de révision")}<=TODAY(),"✔ Calculable","Indice connu – à venir"))')
+    ws[c("Statut")] = (f'=IF({gel},"❄ Gelée",IF({c("Valeur indice réf.")}="",IF({c("Date de révision")}<=TODAY(),"⚠ Indice attendu","À venir"),'
+                       f'IF({c("Date de révision")}<=TODAY(),"✔ Calculable","Indice connu – à venir")))')
     ws[c("Clé")] = f'={c("ID bail")}&"#"&{c("N°")}'
+    # 1 si la révision est échue et son loyer connu (appliqué ou gelé) : sert au loyer actuel de la feuille Alertes
+    ws[c("Effectif")] = f'=IF(AND({c("Date de révision")}<=TODAY(),{c("Loyer retenu (annuel HT)")}<>""),1,0)'
 
     ws[c("Date de révision")].number_format = FMT_DATE
     ws[c("Date d'application")].number_format = FMT_DATE
+    ws[c("Courrier envoyé le")].number_format = FMT_DATE
     for nom in ("Valeur indice réf.", "Valeur indice préc."):
         ws[c(nom)].number_format = FMT_INDICE
     ws[c("Coefficient")].number_format = "0.000000"
@@ -413,8 +451,9 @@ def _ligne_revision(ws: Worksheet, i: int, b: Bail, numero: int, premiere: int) 
     for nom in ("Base de calcul (annuel HT)", "Loyer révisé brut", "Loyer retenu (annuel HT)", "Loyer précédent (annuel HT)",
                 "Loyer mensuel HT", "Loyer / échéance HT", "Charges / échéance HT", "TVA / échéance", "Total TTC / échéance"):
         ws[c(nom)].number_format = FMT_EUR
-    for nom in ("Appliqué ? (Oui/Non)", "Date d'application", "Commentaire"):
+    for _, nom in Saisies.CHAMPS:
         ws[c(nom)].fill = FILL_SAISIE
+    ws[c("Consigne (à faire)")].alignment = Alignment(wrap_text=True, vertical="top")
     for nom, _ in COLS_REV:
         ws[c(nom)].border = BORDURE
 
@@ -432,13 +471,15 @@ def _feuille_alertes(wb: Workbook, baux: list[Bail]) -> None:
         ws[c("Locataire")] = f"={lk(B_LOCATAIRE)}"
         ws[c("Indice")] = f"={lk(B_INDICE)}"
         ws[c("Loyer initial annuel HT")] = f"={lk(B_LOYER)}"
-        ws[c("N° dernière révision calculable")] = f'=_xlfn.MAXIFS({rv("N°")},{rv("ID bail")},{c("ID bail")},{rv("Statut")},"✔ Calculable")'
-        ws[c("Loyer actuel (annuel HT)")] = (f'=IF({c("N° dernière révision calculable")}=0,{c("Loyer initial annuel HT")},'
-                                             f'SUMIFS({rv("Loyer retenu (annuel HT)")},{rv("ID bail")},{c("ID bail")},{rv("N°")},{c("N° dernière révision calculable")}))')
+        ws[c("N° dernière révision effective")] = f'=_xlfn.MAXIFS({rv("N°")},{rv("ID bail")},{c("ID bail")},{rv("Effectif")},1)'
+        ws[c("Loyer actuel (annuel HT)")] = (f'=IF({c("N° dernière révision effective")}=0,{c("Loyer initial annuel HT")},'
+                                             f'SUMIFS({rv("Loyer retenu (annuel HT)")},{rv("ID bail")},{c("ID bail")},{rv("N°")},{c("N° dernière révision effective")}))')
         ws[c("Loyer actuel mensuel HT")] = f'={c("Loyer actuel (annuel HT)")}/12'
         ws[c("Prochaine révision")] = (f'=IF(_xlfn.MINIFS({rv("Date de révision")},{rv("ID bail")},{c("ID bail")},{rv("Date de révision")},">"&TODAY())=0,"—",'
                                        f'_xlfn.MINIFS({rv("Date de révision")},{rv("ID bail")},{c("ID bail")},{rv("Date de révision")},">"&TODAY()))')
-        ws[c("Trimestre attendu")] = (f'=IFERROR(INDEX({rv("Trim. référence")},MATCH({c("ID bail")}&"#"&({c("N° dernière révision calculable")}+1),{rv("Clé")},0)),"—")')
+        ws[c("Trimestre attendu")] = (f'=IFERROR(INDEX({rv("Trim. référence")},MATCH({c("ID bail")}&"#"&({c("N° dernière révision effective")}+1),{rv("Clé")},0)),"—")')
+        ws[c("Consigne prochaine révision")] = (f'=IFERROR(INDEX({rv("Consigne (à faire)")},MATCH({c("ID bail")}&"#"&({c("N° dernière révision effective")}+1),{rv("Clé")},0))&"","")')
+        ws[c("Révisions gelées")] = f'=COUNTIFS({rv("ID bail")},{c("ID bail")},{rv("Statut")},"❄ Gelée")'
         ws[c("Indice publié ?")] = (f'=IF({c("Trimestre attendu")}="—","—",IF(SUMIFS(Indices!$C:$C,Indices!$A:$A,{c("Indice")},Indices!$B:$B,{c("Trimestre attendu")})>0,"Oui","Non"))')
         ws[c("Révisions calculables non appliquées")] = (f'=COUNTIFS({rv("ID bail")},{c("ID bail")},{rv("Statut")},"✔ Calculable",'
                                                          f'{rv("Appliqué ? (Oui/Non)")},"<>Oui")')
@@ -447,6 +488,7 @@ def _feuille_alertes(wb: Workbook, baux: list[Bail]) -> None:
                            f'IF({c("Indice publié ?")}="Oui","Révision dans "&INT({c("Prochaine révision")}-TODAY())&" j – indice publié","Révision dans "&INT({c("Prochaine révision")}-TODAY())&" j – indice non publié"),"RAS"))')
         for nom in ("Loyer initial annuel HT", "Loyer actuel (annuel HT)", "Loyer actuel mensuel HT"):
             ws[c(nom)].number_format = FMT_EUR
+        ws[c("Consigne prochaine révision")].alignment = Alignment(wrap_text=True, vertical="top")
         ws[c("Prochaine révision")].number_format = FMT_DATE
         for nom, _ in COLS_ALERTES:
             ws[c(nom)].border = BORDURE
@@ -512,12 +554,14 @@ def _feuille_pennylane(wb: Workbook, baux: list[Bail]) -> None:
 def lire_classeur(chemin: Path) -> tuple[Societe, list[Bail], Saisies]:
     wb = load_workbook(chemin, data_only=False)
     ws_s = wb["Société"]
-    params = {ws_s.cell(row=r, column=1).value: ws_s.cell(row=r, column=2).value for r in range(1, 12)}
+    params = {ws_s.cell(row=r, column=1).value: ws_s.cell(row=r, column=2).value for r in range(1, 20)}
     societe = Societe(
         nom=str(params.get("Raison sociale") or chemin.stem), siren=str(params.get("SIREN") or ""),
         forme=str(params.get("Forme") or ""), regime_tva=str(params.get("Régime TVA des loyers") or ""),
         pennylane_company=str(params.get("Identifiant société Pennylane") or ""),
         contact=str(params.get("Contact cabinet") or ""), demo=str(params.get("Mode démonstration")).upper() == "OUI",
+        adresse=str(params.get("Adresse du bailleur (courriers)") or ""), signataire=str(params.get("Signataire des courriers") or ""),
+        qualite_signataire=str(params.get("Qualité du signataire") or "Gérant"), ville_signature=str(params.get("Ville de signature") or ""),
     )
     ws_b = wb["Baux"]
     entetes = [ws_b.cell(row=1, column=c).value for c in range(1, len(COLS_BAUX) + 1)]
@@ -532,6 +576,7 @@ def lire_classeur(chemin: Path) -> tuple[Societe, list[Bail], Saisies]:
             continue
         baux.append(Bail(
             id=str(v(B_ID)).strip(), local=str(v(B_LOCAL) or ""), locataire=str(v(B_LOCATAIRE) or ""),
+            adresse_locataire=str(v(B_ADRESSE) or ""),
             type_bail=str(v(B_TYPE) or "Commercial"), date_effet=_en_date(v(B_EFFET)),
             duree_ans=int(v(B_DUREE)) if v(B_DUREE) not in (None, "") else None,
             loyer_initial_annuel_ht=float(v(B_LOYER) or 0), charges_annuelles_ht=float(v(B_CHARGES) or 0),
@@ -552,12 +597,26 @@ def lire_classeur(chemin: Path) -> tuple[Societe, list[Bail], Saisies]:
             if bid in (None, "") or num in (None, ""):
                 continue
             cle = (str(bid), int(num))
-            for attr, nom in (("applique", "Appliqué ? (Oui/Non)"), ("date_application", "Date d'application"),
-                              ("commentaire", "Commentaire")):
+            for attr, nom in Saisies.CHAMPS:
                 val = ws_r[f"{R[nom]}{r}"].value
                 if val not in (None, ""):
                     getattr(saisies, attr)[cle] = val
     return societe, baux, saisies
+
+
+def lire_indices_classeur(chemin: Path) -> list[Observation]:
+    """Observations telles que présentes dans la feuille Indices du classeur (ce que voit le cabinet)."""
+    wb = load_workbook(chemin, data_only=False)
+    ws = wb["Indices"]
+    obs: list[Observation] = []
+    for r in range(2, ws.max_row + 1):
+        serie, periode, valeur = ws.cell(row=r, column=1).value, ws.cell(row=r, column=2).value, ws.cell(row=r, column=3).value
+        if serie in (None, "") or valeur in (None, ""):
+            continue
+        obs.append(Observation(str(serie), str(ws.cell(row=r, column=4).value or ""), str(periode), float(valeur),
+                               str(ws.cell(row=r, column=4).value or ""), str(ws.cell(row=r, column=5).value or ""),
+                               str(ws.cell(row=r, column=6).value or ""), str(ws.cell(row=r, column=7).value or "")))
+    return obs
 
 
 def rafraichir(chemin: Path, observations: list[Observation], aujourdhui: date | None = None) -> Path:
