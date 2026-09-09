@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -186,20 +185,8 @@ def envoyer(abonnements: list[Abonnement], mapping: dict, token: str, remplacer:
 
 def enregistrer_subscription_ids(chemin_classeur: Path, ids: dict[str, str]) -> int:
     """Inscrit les identifiants d'abonnement créés dans la colonne « Pennylane subscription_id » de Baux."""
-    from openpyxl import load_workbook
-    from .workbook import B_ID, B_SUBSCR
-    shutil.copy2(chemin_classeur, chemin_classeur.with_suffix(f".{datetime.now():%Y%m%d-%H%M%S}.bak.xlsx"))
-    wb = load_workbook(chemin_classeur)
-    ws = wb["Baux"]
-    n = 0
-    for r in range(2, ws.max_row + 1):
-        bid = ws[f"{B_ID}{r}"].value
-        if bid is not None and str(bid).strip() in ids:
-            ws[f"{B_SUBSCR}{r}"] = ids[str(bid).strip()]
-            n += 1
-    wb.calculation.fullCalcOnLoad = True
-    wb.save(chemin_classeur)
-    return n
+    from .workbook import B_SUBSCR, ecrire_colonne_baux
+    return ecrire_colonne_baux(chemin_classeur, ids, B_SUBSCR)
 
 
 def _slug(s: str) -> str:

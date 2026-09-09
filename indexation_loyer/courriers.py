@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -21,7 +20,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from . import calcul
 from .baux import Bail, est_gel
 from .insee import Observation, charger_config
-from .workbook import R, Saisies, Societe, lire_classeur
+from .workbook import Saisies, Societe
 
 log = logging.getLogger(__name__)
 RACINE = Path(__file__).resolve().parent.parent
@@ -213,23 +212,9 @@ def generer(societe: Societe, cibles: list[Cible], dossier: Path, aujourdhui: da
 
 def marquer_envoyes(chemin_classeur: Path, cibles: list[Cible], aujourdhui: date | None = None) -> int:
     """Inscrit la date du jour dans « Courrier envoyé le » pour les échéances notifiées (avec sauvegarde)."""
-    from openpyxl import load_workbook
+    from .workbook import ecrire_cellules_revisions
     aujourdhui = aujourdhui or date.today()
-    shutil.copy2(chemin_classeur, chemin_classeur.with_suffix(f".{datetime.now():%Y%m%d-%H%M%S}.bak.xlsx"))
-    wb = load_workbook(chemin_classeur)
-    ws = wb["Révisions"]
-    cles = {(b.id, l.echeance.numero) for b, l in cibles}
-    n = 0
-    for r in range(2, ws.max_row + 1):
-        cle = (str(ws[f"{R['ID bail']}{r}"].value), ws[f"{R['N°']}{r}"].value)
-        if cle[1] is not None and (cle[0], int(cle[1])) in cles:
-            c = ws[f"{R['Courrier envoyé le']}{r}"]
-            c.value = aujourdhui
-            c.number_format = "DD/MM/YYYY"
-            n += 1
-    wb.calculation.fullCalcOnLoad = True
-    wb.save(chemin_classeur)
-    return n
+    return ecrire_cellules_revisions(chemin_classeur, {(b.id, l.echeance.numero): aujourdhui for b, l in cibles}, "Courrier envoyé le")
 
 
 def _slug(s: str) -> str:

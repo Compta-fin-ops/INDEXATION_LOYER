@@ -53,6 +53,7 @@ class Bail:
     pennylane_product_id: str = ""
     pennylane_subscription_id: str = ""  # renseigné par la commande pennylane --push
     notes: str = ""
+    ligne_baux: int = 0                  # position dans la feuille Baux (renseignée à la lecture)
     erreurs: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:

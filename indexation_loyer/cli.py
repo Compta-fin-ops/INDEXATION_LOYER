@@ -19,7 +19,7 @@ from pathlib import Path
 
 from . import insee, pennylane
 from .baux import Bail
-from .workbook import Societe, construire, lire_classeur, lire_indices_classeur, rafraichir
+from .workbook import Societe, construire, lire_classeur, lire_indices_classeur, mettre_a_jour_indices
 
 RACINE = Path(__file__).resolve().parent.parent
 DOSSIER_SUIVI = RACINE / "suivi"
@@ -96,15 +96,21 @@ def cmd_init(args) -> int:
             log.warning("Bail %s : %s", b.id, e)
     observations = insee.lire_cache()
     if not observations:
-        log.warning("Cache d'indices vide : lancer d'abord `fetch-indices`. Le classeur est créé sans indices.")
-    societe = Societe(nom=args.societe, siren=args.siren or "", forme=args.forme, contact=args.contact or "")
+        log.warning("Cache d'indices vide : la grille Indices est à saisir à la main (ou lancer fetch-indices puis refresh).")
+    societe = Societe(nom=args.societe, siren=args.siren or "", forme=args.forme, contact=args.contact or "",
+                      max_baux=args.max_baux, max_echeances=args.max_echeances)
     construire(societe, baux, observations, chemin)
-    print(f"Classeur créé : {chemin}  ({len(baux)} bail/baux, {len(observations)} observations d'indices)")
+    print(f"Classeur créé : {chemin}  ({len(baux)} bail/baux pré-remplis, capacité {args.max_baux} baux × {args.max_echeances} révisions, "
+          f"{len(observations)} valeurs d'indices écrites)")
     return 0
 
 
 def cmd_refresh(args) -> int:
+    """Écrit les indices du cache dans la grille Indices du/des classeur(s), sans toucher au reste."""
     observations = insee.lire_cache()
+    if not observations:
+        print("Cache d'indices vide : lancer d'abord fetch-indices.")
+        return 1
     cibles = sorted(Path(args.dossier).glob("*_indexation_loyers.xlsx")) if args.tous else [chemin_classeur(args.societe, Path(args.dossier))]
     code = 0
     for chemin in cibles:
@@ -112,9 +118,8 @@ def cmd_refresh(args) -> int:
             print(f"Introuvable : {chemin}")
             code = 1
             continue
-        rafraichir(chemin, observations)
-        _, baux, _ = lire_classeur(chemin)
-        print(f"Rafraîchi : {chemin}  ({len(baux)} bail/baux, {len(observations)} observations)")
+        n = mettre_a_jour_indices(chemin, observations)
+        print(f"Indices mis à jour : {chemin}  ({n} valeurs écrites, sauvegarde .bak créée)")
     return code
 
 
@@ -213,10 +218,12 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--contact")
     i.add_argument("--baux", help="CSV ; d'import initial des baux (optionnel)")
     i.add_argument("--dossier", default=str(DOSSIER_SUIVI))
+    i.add_argument("--max-baux", type=int, default=40, help="Lignes de baux pré-câblées (défaut 40)")
+    i.add_argument("--max-echeances", type=int, default=12, help="Révisions pré-câblées par bail (défaut 12)")
     i.add_argument("--force", action="store_true")
     i.set_defaults(func=cmd_init)
 
-    r = sp.add_parser("refresh", help="Recalcule le(s) classeur(s) avec le cache d'indices courant")
+    r = sp.add_parser("refresh", help="Écrit les indices du cache dans la grille Indices du/des classeur(s)")
     r.add_argument("societe", nargs="?")
     r.add_argument("--tous", action="store_true")
     r.add_argument("--dossier", default=str(DOSSIER_SUIVI))
