@@ -242,6 +242,47 @@ def parser_csv_insee(contenu: bytes, config: dict | None = None,
     return obs
 
 
+def parser_xlsx_insee(chemin: Path, config: dict | None = None, serie_forcee: str | None = None,
+                      date_extraction: date | None = None) -> list[Observation]:
+    """Parse l'export « Télécharger (xlsx) » d'une série insee.fr.
+
+    Format constaté (export du 10/09/2026) : feuille ``valeurs_trimestrielles`` :
+        L1 Libellé | <titre>          L2 idBank | 001532540
+        L3 Dernière mise à jour | 24/06/2026 12:00
+        L4 Période | (vide) | Date de parution au JO
+        L5.. 2026-T1 | 135.26 | 28/06/2026   (du plus récent au plus ancien)
+    Le parseur ne s'appuie que sur la ligne idBank et le motif AAAA-Tn en colonne A.
+    """
+    from openpyxl import load_workbook
+    config = config or charger_config()
+    par_idbank = {v["idbank"]: code for code, v in config["series"].items()}
+    date_extraction = (date_extraction or date.today()).isoformat()
+    wb = load_workbook(chemin, data_only=True, read_only=True)
+    ws = wb["valeurs_trimestrielles"] if "valeurs_trimestrielles" in wb.sheetnames else wb.worksheets[0]
+    idbank, code, maj = "", serie_forcee, ""
+    obs: list[Observation] = []
+    for row in ws.iter_rows(values_only=True):
+        a = str(row[0]).strip() if row and row[0] is not None else ""
+        if a.lower() == "idbank" and len(row) > 1:
+            idbank = re.sub(r"\D", "", str(row[1]))
+            code = code or par_idbank.get(idbank)
+            continue
+        if _sans_accents(a).startswith("derniere mise a jour") and len(row) > 1:
+            maj = str(row[1])
+            continue
+        m = re.match(r"^(\d{4})-[TQ]([1-4])$", a)
+        if m and code and len(row) > 1 and isinstance(row[1], (int, float)):
+            jo = row[2] if len(row) > 2 and row[2] is not None else ""
+            obs.append(Observation(
+                serie=code, idbank=idbank or config["series"][code]["idbank"], periode=f"{m.group(1)}-T{m.group(2)}",
+                valeur=float(row[1]), statut_obs=f"JO {jo}" if jo else "", date_maj_insee=maj,
+                source="INSEE_XLSX", date_extraction=date_extraction,
+            ))
+    if not obs:
+        raise ValueError("Aucune observation reconnue dans l'export xlsx INSEE (préciser --serie si la ligne idBank manque).")
+    return obs
+
+
 # ---------------------------------------------------------------------------
 # Cache CSV
 # ---------------------------------------------------------------------------
@@ -271,8 +312,8 @@ def ecrire_cache(observations: Iterable[Observation], chemin: Path = CHEMIN_CACH
 
 
 def fusionner(existant: Iterable[Observation], nouveau: Iterable[Observation]) -> list[Observation]:
-    """Fusion clé (serie, periode) : la donnée INSEE écrase tout ; une saisie
-    MANUEL n'écrase qu'une absence ou une autre saisie MANUEL/FICTIF."""
+    """Fusion clé (serie, periode) : la donnée INSEE (SDMX, CSV, XLSX) écrase tout ;
+    une saisie MANUEL n'écrase qu'une absence ou une autre saisie MANUEL/FICTIF."""
     resultat: dict[tuple[str, str], Observation] = {o.cle: o for o in existant}
     for o in nouveau:
         courant = resultat.get(o.cle)
@@ -289,7 +330,9 @@ def mettre_a_jour_cache(codes: Iterable[str] | None = None, chemin: Path = CHEMI
     Retourne (observations fusionnées, observations nouvelles ou modifiées).
     """
     existant = lire_cache(chemin)
-    if fichier_csv:
+    if fichier_csv and str(fichier_csv).lower().endswith((".xlsx", ".xlsm")):
+        nouveau = parser_xlsx_insee(Path(fichier_csv), serie_forcee=serie_forcee)
+    elif fichier_csv:
         nouveau = parser_csv_insee(Path(fichier_csv).read_bytes(), serie_forcee=serie_forcee)
     else:
         nouveau = recuperer_series(codes, start_period=start_period, api_insee=api_insee)

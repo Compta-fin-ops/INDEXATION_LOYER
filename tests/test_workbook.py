@@ -1,5 +1,5 @@
-"""Classeur autonome : structure, lecture, mise à jour des indices, et parité des formules
-recalculées par LibreOffice avec le moteur Python (ignoré si soffice indisponible)."""
+"""Classeur « un onglet par bail » : structure, lecture, mise à jour des indices, et parité des
+formules recalculées par LibreOffice avec le moteur Python (ignoré si soffice indisponible)."""
 import json
 import os
 import shutil
@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 
 from indexation_loyer import calcul, demo, pennylane
 from indexation_loyer.insee import Observation
-from indexation_loyer.workbook import (COLS_BAUX, R, A, P, B_LOYER, cellule_indice, ligne_revision,
+from indexation_loyer.workbook import (PC, R, A, P, SC, colonne_zone, ligne_revision, nom_onglet,
                                        lire_classeur, lire_indices_classeur, mettre_a_jour_indices)
 
 AUJOURDHUI = date(2026, 9, 9)
@@ -25,51 +25,67 @@ def classeur_demo(tmp_path_factory) -> Path:
 
 def test_structure(classeur_demo):
     wb = load_workbook(classeur_demo)
-    assert wb.sheetnames == ["Lisez-moi", "Société", "Baux", "Indices", "Révisions", "Alertes", "Pennylane", "Indices_long"]
-    assert wb["Indices_long"].sheet_state == "hidden"
-    ws = wb["Baux"]
-    assert [ws.cell(row=1, column=i + 1).value for i in range(len(COLS_BAUX))] == [n for n, _ in COLS_BAUX]
-    ws_r = wb["Révisions"]
-    assert ws_r.max_row == 1 + 40 * 12                       # grille pré-câblée
-    assert ws_r["A2"].value.startswith("=IF(Baux!$A$2")
-    assert ws_r[f"{R['N°']}{ligne_revision(2, 3)}"].value == 3
-    assert "_xlfn.MAXIFS" in wb["Alertes"][f"{A['N° dernière révision effective']}2"].value
-    assert wb["Indices"][cellule_indice("ILC", 2025, 4)].value == 123.8   # valeur fictive écrite dans la grille
+    assert wb.sheetnames == ["Lisez-moi", "Société", "Récapitulatif", "Indices", "Grille_rang", "Grille indices", "Modèle", "B01", "B02", "B03", "B04", "Pennylane"]
+    assert wb["Grille_rang"].sheet_state == "hidden"
+    fiche = wb["B03"]
+    assert fiche["B3"].value == "ID bail (= nom de l'onglet)" and fiche[PC["id"]].value == "B03"
+    assert fiche[f"{R['N°']}{ligne_revision(1)}"].value == 1 and fiche[f"{R['N°']}{ligne_revision(12)}"].value == 12
+    assert fiche[f"{R['Décision']}{ligne_revision(6)}"].value == "Geler – rattrapage possible"
+    assert "_xlfn.MAXIFS" in fiche[SC["n_eff"]].value
+    assert wb["Récapitulatif"]["A2"].value == "B01" and "INDIRECT" in wb["Récapitulatif"]["B2"].value
+    assert wb["Modèle"][PC["id"]].value is None and wb["Modèle"][PC["indice"]].value == "ILC"
+    # zone de collage ILC : du plus récent au plus ancien
+    zi = wb["Indices"]
+    c0 = colonne_zone("ILC")
+    assert zi.cell(row=1, column=c0).value == "ILC" and zi.cell(row=4, column=c0).value == "2026-T1"
+    assert zi.cell(row=4, column=c0 + 1).value == 124.4
+    assert nom_onglet("SCI/DUPONT [2]") == "SCI-DUPONT -2-"
 
 
 def test_lecture_et_mise_a_jour_indices_preservent_les_saisies(classeur_demo, tmp_path):
     copie = tmp_path / "copie.xlsx"
     shutil.copy(classeur_demo, copie)
     wb = load_workbook(copie)
-    wb["Révisions"][f"{R['Commentaire']}2"] = "Facturé le 05/04/2022"
-    wb["Baux"][f"{B_LOYER}2"] = 25000
+    wb["B01"][f"{R['Commentaire']}{ligne_revision(1)}"] = "Facturé le 05/04/2022"
+    wb["B01"][PC["loyer_initial_annuel_ht"]] = 25000
     wb.save(copie)
 
     societe, baux, saisies = lire_classeur(copie)
-    assert societe.demo and societe.max_baux == 40 and len(baux) == 4
-    assert baux[0].loyer_initial_annuel_ht == 25000 and baux[0].ligne_baux == 2
+    assert societe.demo and len(baux) == 4 and [b.onglet for b in baux] == ["B01", "B02", "B03", "B04"]
+    assert baux[0].loyer_initial_annuel_ht == 25000
     assert saisies.decision[("B01", 4)] == "Geler – sans rattrapage"
     assert saisies.commentaire[("B01", 1)] == "Facturé le 05/04/2022"
     assert saisies.consigne[("B03", 6)].startswith("Gel d'un an")
 
-    n = mettre_a_jour_indices(copie, [Observation("ILC", "001532540", "2026-T2", 130.0, "A", "", "INSEE_SDMX", "")])
+    # refresh : seule la zone ILC est réécrite ; les autres zones et les fiches ne bougent pas
+    n = mettre_a_jour_indices(copie, [Observation("ILC", "001532540", "2026-T2", 130.0, "JO 24/09/2026", "", "INSEE_XLSX", "")])
     assert n == 1
     wb2 = load_workbook(copie)
-    assert wb2["Indices"][cellule_indice("ILC", 2026, 2)].value == 130.0
-    assert wb2["Révisions"][f"{R['Commentaire']}2"].value == "Facturé le 05/04/2022"
-    assert wb2["Baux"][f"{B_LOYER}2"].value == 25000
+    zi = wb2["Indices"]
+    c0 = colonne_zone("ILC")
+    assert (zi.cell(row=4, column=c0).value, zi.cell(row=4, column=c0 + 1).value, zi.cell(row=4, column=c0 + 2).value) == ("2026-T2", 130.0, "24/09/2026")
+    assert zi.cell(row=5, column=c0).value is None                                  # zone ILC remplacée
+    assert zi.cell(row=4, column=colonne_zone("ILAT")).value == "2026-T1"          # zone ILAT intacte
+    assert wb2["B01"][f"{R['Commentaire']}{ligne_revision(1)}"].value == "Facturé le 05/04/2022"
+    assert wb2["B01"][PC["loyer_initial_annuel_ht"]].value == 25000
     assert list(tmp_path.glob("copie.*.bak.xlsx"))
-    assert ("ILC", "2026-T2") in {o.cle for o in lire_indices_classeur(copie)}
+    obs = {o.cle: o.valeur for o in lire_indices_classeur(copie)}
+    assert obs[("ILC", "2026-T2")] == 130.0 and ("ILAT", "2026-T1") in obs
 
 
-def test_lire_classeur_refuse_colonnes_modifiees(classeur_demo, tmp_path):
-    copie = tmp_path / "casse.xlsx"
+def test_onglet_duplique_a_la_main_est_lu(classeur_demo, tmp_path):
+    """Simule l'usage réel : copie du Modèle, renommage, saisie des paramètres."""
+    copie = tmp_path / "dup.xlsx"
     shutil.copy(classeur_demo, copie)
     wb = load_workbook(copie)
-    wb["Baux"].insert_cols(3)
+    ws = wb.copy_worksheet(wb["Modèle"])
+    ws.title = "DURAND"
+    ws[PC["id"]], ws[PC["local"]], ws[PC["locataire"]] = "DURAND", "Cave 3", "Durand & Fils"
+    ws[PC["date_effet"]], ws[PC["loyer_initial_annuel_ht"]], ws[PC["trimestre_base"]] = date(2024, 2, 1), 6000, "2023-T3"
     wb.save(copie)
-    with pytest.raises(ValueError, match="feuille Baux"):
-        lire_classeur(copie)
+    _, baux, _ = lire_classeur(copie)
+    d = next(b for b in baux if b.id == "DURAND")
+    assert d.onglet == "DURAND" and d.loyer_initial_annuel_ht == 6000 and d.indice == "ILC" and d.duree_ans == 9
 
 
 def _recalculer(chemin: Path, tmp: Path) -> Path | None:
@@ -96,56 +112,64 @@ def test_parite_libreoffice_moteur_python(classeur_demo, tmp_path):
             for v in row:
                 assert not (isinstance(v, str) and v.startswith(("#", "Err:"))), f"{ws.title}: {v}"
 
-    # 2. Révisions actives : identiques au moteur Python ; lignes hors bail vides
+    # 2. fiches : révisions actives identiques au moteur Python, lignes hors durée vides
     indices = calcul.table_indices(demo.indices_fictifs(AUJOURDHUI))
     decisions = demo.saisies_fictives().decision
     baux = demo.baux_fictifs()
-    attendu = {}
-    for b in baux:
-        for l in calcul.calculer(b, indices, horizon=b.date_fin, aujourdhui=AUJOURDHUI, decisions=decisions):
-            attendu[(b.id, l.echeance.numero)] = l
-    ws = wb["Révisions"]
     actives = 0
-    for r in range(2, ws.max_row + 1):
-        if ws[f"{R['Actif']}{r}"].value != 1:
-            assert ws[f"{R['Statut']}{r}"].value in (None, "") and ws[f"{R['Loyer retenu (annuel HT)']}{r}"].value in (None, "")
-            continue
-        cle = (ws[f"A{r}"].value, ws[f"{R['N°']}{r}"].value)
-        l = attendu.pop(cle)
-        retenu = ws[f"{R['Loyer retenu (annuel HT)']}{r}"].value
-        assert (retenu in (None, "")) == (l.loyer_retenu is None), cle
-        if l.loyer_retenu is not None:
-            assert abs(retenu - l.loyer_retenu) < 0.005, cle
-        assert ws[f"{R['Statut']}{r}"].value == l.statut, cle
-        assert ws[f"{R['Trim. précédent']}{r}"].value == l.trimestre_precedent_effectif, cle
-        assert ws[f"{R['Date de révision']}{r}"].value.date() == l.echeance.date_revision
-        actives += 1
-    assert actives == 30 and not attendu
-
-    # 3. Alertes
-    ws_a = wb["Alertes"]
-    for r in range(2, 6):
-        b = next(b for b in baux if b.id == ws_a[f"A{r}"].value)
+    for b in baux:
+        ws = wb[nom_onglet(b.id)]
+        attendu = {l.echeance.numero: l for l in calcul.calculer(b, indices, horizon=b.date_fin, aujourdhui=AUJOURDHUI, decisions=decisions)}
+        for k in range(1, 13):
+            r = ligne_revision(k)
+            if ws[f"{R['Actif']}{r}"].value != 1:
+                assert k not in attendu and ws[f"{R['Statut']}{r}"].value in (None, "")
+                continue
+            l = attendu.pop(k)
+            retenu = ws[f"{R['Loyer retenu (annuel HT)']}{r}"].value
+            assert (retenu in (None, "")) == (l.loyer_retenu is None), (b.id, k)
+            if l.loyer_retenu is not None:
+                assert abs(retenu - l.loyer_retenu) < 0.005, (b.id, k)
+            assert ws[f"{R['Statut']}{r}"].value == l.statut, (b.id, k)
+            assert ws[f"{R['Trim. précédent']}{r}"].value == l.trimestre_precedent_effectif, (b.id, k)
+            assert ws[f"{R['Date de révision']}{r}"].value.date() == l.echeance.date_revision
+            actives += 1
+        assert not attendu
+        # situation
         lignes = calcul.calculer(b, indices, horizon=b.date_fin, aujourdhui=AUJOURDHUI, decisions=decisions)
-        assert abs(ws_a[f"{A['Loyer actuel (annuel HT)']}{r}"].value - calcul.loyer_actuel(b, lignes, AUJOURDHUI)) < 0.005
-    assert ws_a[f"{A['Révisions gelées']}2"].value == 1
-    assert ws_a[f"{A['Indice publié ?']}2"].value == "Non" and ws_a[f"{A['Trimestre attendu']}2"].value == "2026-T4"
-    assert ws_a[f"{A['Action']}2"].value.startswith("⚠ Facturer")
-    assert ws_a["A6"].value in (None, "") and ws_a[f"{A['Action']}6"].value in (None, "")   # ligne sans bail
+        assert abs(ws[SC["loyer_actuel"]].value - calcul.loyer_actuel(b, lignes, AUJOURDHUI)) < 0.005
+        assert ws[PC["controles"]].value == "OK"
+    assert actives == 30
+    b01 = wb["B01"]
+    assert b01[SC["gelees"]].value == 1 and b01[SC["indice_publie"]].value == "Non" and b01[SC["trim_attendu"]].value == "2026-T4"
+    assert str(b01[SC["action"]].value).startswith("⚠ Facturer")
 
-    # 4. Lisez-moi : derniers indices saisis
+    # 3. récapitulatif (INDIRECT) = fiches ; total
+    ws_r = wb["Récapitulatif"]
+    for r in range(2, 6):
+        ong = ws_r[f"A{r}"].value
+        assert ws_r[f"{A['ID bail']}{r}"].value == ong and ws_r[f"{A['Contrôles']}{r}"].value == "OK"
+        assert abs(ws_r[f"{A['Loyer actuel (annuel HT)']}{r}"].value - wb[ong][SC["loyer_actuel"]].value) < 0.005
+    assert ws_r["A6"].value in (None, "") and ws_r[f"{A['Action']}6"].value in (None, "")
+    total = sum(wb[nom_onglet(b.id)][SC["loyer_actuel"]].value for b in baux)
+    assert abs(ws_r[f"{A['Loyer actuel (annuel HT)']}43"].value - total) < 0.01
+
+    # 4. Lisez-moi : derniers indices collés
     ws_l = wb["Lisez-moi"]
-    derniers = {ws_l[f"B{r}"].value.split(" – ")[0]: (ws_l[f"C{r}"].value, ws_l[f"D{r}"].value) for r in range(8, 12)}
-    assert derniers["ILC"] == ("2026-T1", 124.4) and derniers["ICC"][0] == "2026-T1"
+    derniers = {ws_l[f"B{r}"].value.split(" – ")[0]: (ws_l[f"C{r}"].value, ws_l[f"D{r}"].value) for r in range(9, 13)}
+    assert derniers["ILC"] == ("2026-T1", 124.4) and derniers["ICC"] == ("2026-T1", 1892)
 
-    # 5. Pennylane : JSON par formules == corps du client Python
+    # 5. Grille indices = zones collées
+    assert wb["Grille indices"]["B29"].value == 124.4          # ILC 2026-T1 (ligne 3 + 26)
+
+    # 6. Pennylane : JSON par formules == corps du client Python
     mapping = pennylane.charger_mapping()
     societe, _, _ = lire_classeur(classeur_demo)
     reglages = pennylane.ReglagesPennylane(societe.pl_mode, societe.pl_payment_conditions, societe.pl_payment_method)
     ws_p = wb["Pennylane"]
     for r in range(2, 6):
         excel = json.loads(ws_p[f"{P['Corps JSON – POST /api/external/v2/billing_subscriptions']}{r}"].value.replace("À RENSEIGNER", "0"))
-        b = next(b for b in baux if b.id == ws_p[f"A{r}"].value)
+        b = next(b for b in baux if nom_onglet(b.id) == ws_p[f"A{r}"].value)
         python = pennylane.construire_abonnement(b, demo.indices_fictifs(AUJOURDHUI), mapping, reglages,
                                                  aujourdhui=date.today(), decisions=decisions).corps   # TODAY() côté LibreOffice
         python["customer_invoice_data"].pop("special_mention", None)

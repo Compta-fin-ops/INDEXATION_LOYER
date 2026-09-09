@@ -185,8 +185,8 @@ def envoyer(abonnements: list[Abonnement], mapping: dict, token: str, remplacer:
 
 def enregistrer_subscription_ids(chemin_classeur: Path, ids: dict[str, str]) -> int:
     """Inscrit les identifiants d'abonnement créés dans la colonne « Pennylane subscription_id » de Baux."""
-    from .workbook import B_SUBSCR, ecrire_colonne_baux
-    return ecrire_colonne_baux(chemin_classeur, ids, B_SUBSCR)
+    from .workbook import ecrire_parametre_fiches
+    return ecrire_parametre_fiches(chemin_classeur, ids, "pennylane_subscription_id")
 
 
 def _slug(s: str) -> str:

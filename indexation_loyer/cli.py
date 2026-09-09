@@ -96,12 +96,12 @@ def cmd_init(args) -> int:
             log.warning("Bail %s : %s", b.id, e)
     observations = insee.lire_cache()
     if not observations:
-        log.warning("Cache d'indices vide : la grille Indices est à saisir à la main (ou lancer fetch-indices puis refresh).")
+        log.warning("Cache d'indices vide : coller les exports insee.fr dans la feuille Indices (ou fetch-indices puis refresh).")
     societe = Societe(nom=args.societe, siren=args.siren or "", forme=args.forme, contact=args.contact or "",
-                      max_baux=args.max_baux, max_echeances=args.max_echeances)
+                      max_echeances=args.max_echeances)
     construire(societe, baux, observations, chemin)
-    print(f"Classeur créé : {chemin}  ({len(baux)} bail/baux pré-remplis, capacité {args.max_baux} baux × {args.max_echeances} révisions, "
-          f"{len(observations)} valeurs d'indices écrites)")
+    print(f"Classeur créé : {chemin}  ({len(baux)} fiche(s) de bail pré-remplie(s), {args.max_echeances} révisions par fiche, "
+          f"{len(observations)} valeurs d'indices écrites dans les zones de collage)")
     return 0
 
 
@@ -119,7 +119,7 @@ def cmd_refresh(args) -> int:
             code = 1
             continue
         n = mettre_a_jour_indices(chemin, observations)
-        print(f"Indices mis à jour : {chemin}  ({n} valeurs écrites, sauvegarde .bak créée)")
+        print(f"Indices mis à jour : {chemin}  ({n} valeurs écrites dans les zones de collage, sauvegarde .bak créée)")
     return code
 
 
@@ -206,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     f = sp.add_parser("fetch-indices", help="Met à jour le cache d'indices depuis l'INSEE (ou un export CSV)")
     f.add_argument("--series", nargs="*", help="Sous-ensemble : ILC ILAT ICC IRL (défaut : toutes)")
     f.add_argument("--depuis", default="2000-Q1", help="startPeriod SDMX (défaut 2000-Q1)")
-    f.add_argument("--fichier", type=Path, help="Export CSV/zip insee.fr à importer au lieu d'appeler l'API")
+    f.add_argument("--fichier", type=Path, help="Export insee.fr (xlsx, csv ou zip) à importer au lieu d'appeler l'API")
     f.add_argument("--serie", help="Code série à forcer pour --fichier si la ligne idBank manque")
     f.add_argument("--api-insee", action="store_true", help="Passer par api.insee.fr/series/BDM avec le jeton INSEE_API_TOKEN")
     f.set_defaults(func=cmd_fetch)
@@ -218,7 +218,6 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--contact")
     i.add_argument("--baux", help="CSV ; d'import initial des baux (optionnel)")
     i.add_argument("--dossier", default=str(DOSSIER_SUIVI))
-    i.add_argument("--max-baux", type=int, default=40, help="Lignes de baux pré-câblées (défaut 40)")
     i.add_argument("--max-echeances", type=int, default=12, help="Révisions pré-câblées par bail (défaut 12)")
     i.add_argument("--force", action="store_true")
     i.set_defaults(func=cmd_init)

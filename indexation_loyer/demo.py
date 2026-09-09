@@ -16,7 +16,8 @@ from .workbook import Saisies, Societe, construire
 
 
 def indices_fictifs(aujourdhui: date) -> list[Observation]:
-    """Séries fictives de 2018-T1 au dernier trimestre publiable à `aujourdhui`."""
+    """Séries fictives de 2018-T1 au dernier trimestre publiable à `aujourdhui` (ILC compris :
+    le classeur de démo reste entièrement fictif pour éviter toute confusion)."""
     dernier = Trimestre.de_date(aujourdhui).plus_trimestres(-2)
     obs: list[Observation] = []
     for code, idbank, depart, pas in (("ILC", "001532540", 110.0, 0.60), ("ILAT", "001617112", 108.0, 0.55),

@@ -84,3 +84,12 @@ def test_bail_erreurs():
     b = Bail(id="B3", local="", locataire="", date_effet=date(2024, 1, 1), loyer_initial_annuel_ht=1,
              indice="IPC", methode="Autre", periodicite_facturation="Hebdo")
     assert len(b.erreurs) == 3
+
+
+def test_parser_xlsx_insee_export_reel():
+    obs = insee.parser_xlsx_insee(FIXTURES / "insee_export_serie_001532540_10092026.xlsx", date_extraction=date(2026, 9, 10))
+    assert len(obs) == 85 and {o.serie for o in obs} == {"ILC"}
+    par = {o.periode: o for o in obs}
+    assert par["2026-T1"].valeur == 135.26 and par["2026-T1"].statut_obs == "JO 28/06/2026"
+    assert par["2005-T1"].valeur == 92.15 and par["2025-T4"].valeur == 134.62
+    assert obs[0].source == "INSEE_XLSX" and obs[0].date_maj_insee == "24/06/2026 12:00"

@@ -1,54 +1,62 @@
 # INDEXATION_LOYER – suivi des réindexations de loyers par société
 
-**Thèse.** Un classeur Excel par société bailleresse, **autonome** : le cabinet saisit les baux et les
-indices INSEE, tout le reste est calculé par formules (calendrier des révisions, décision d'appliquer ou de
-geler, alertes de facturation, préparation des abonnements Pennylane). Le script Python ne fait que créer le
-classeur, puis, dans un second temps, l'alimenter en indices et créer les abonnements Pennylane.
+**Thèse.** Un classeur Excel par société bailleresse, **autonome** et organisé comme un dossier : un onglet
+par bail (fiche dupliquée depuis un modèle), un récapitulatif qui agrège tous les onglets, une feuille Indices
+où l'on colle l'export insee.fr tel quel. Tout est formules ; le script Python ne fait que créer le classeur
+puis, en phase 2, l'alimenter en indices et créer les abonnements Pennylane.
 
 **Phasage**
 
 | Phase | Contenu | État |
 |---|---|---|
-| 1 – Classeur | Modèle Excel testable seul : Baux, Indices (grille de saisie), Révisions pré-câblées, Décision de gel + consigne, Alertes, courriers PDF | ✔ à tester en cabinet |
-| 2 – Automatisation | Récupération des indices INSEE dans la grille, création des abonnements Pennylane depuis le classeur | code prêt, à tester en réel une fois la phase 1 validée |
+| 1 – Classeur | Modèle Excel testable seul : fiches de bail, récapitulatif, indices à coller, décision de gel + consigne, courriers PDF | ✔ à tester en cabinet |
+| 2 – Automatisation | Récupération des indices INSEE (API ou import de l'export xlsx), création des abonnements Pennylane | import xlsx ✔ ; API et Pennylane codés, à tester en réel |
 
 ```
-                       PHASE 1 (autonome)                                         PHASE 2 (script)
-   Cabinet ──saisit──►  Baux  ─────────────┐                          INSEE BDM ──fetch-indices──► cache CSV
-   Cabinet ──saisit──►  Indices (grille)   ├──formules──►  Révisions ──► Alertes            │ refresh : écrit dans la grille Indices
-                                            │              (Décision, Consigne)               ▼
-                                            └────────────────────────────────►  Pennylane ──pennylane --push──► POST /billing_subscriptions
-                              courriers <société>  ──►  out/courriers/*.pdf
+   insee.fr ──export xlsx──► copier-coller ──►  Indices (4 zones : ILC, ILAT, ICC, IRL)
+                                                        │ formules
+   Modèle ──dupliquer + renommer──►  fiche B01 │ fiche B02 │ …   (paramètres, situation, 12 révisions, Décision, Consigne)
+                                                        │ INDIRECT(nom d'onglet)
+                                                Récapitulatif (une ligne par onglet, total des loyers)  ──►  Pennylane (aperçu JSON)
+   script :  init · refresh (écrit les zones Indices) · courriers (PDF) · pennylane --push (phase 2)
 ```
 
 ## Le classeur (phase 1)
 
-Créer un classeur : `python -m indexation_loyer init "SCI DES HALLES"` (ou `demo` pour l'exemple à valeurs
-fictives). Ensuite tout se passe dans Excel :
+Créer un classeur : `python -m indexation_loyer init "SCI DES HALLES"` (ou `demo`). Ensuite tout se passe dans Excel.
 
 | Feuille | Rôle | Qui écrit |
 |---|---|---|
-| Lisez-moi | Mode d'emploi, derniers indices saisis (formules), points de vigilance | modèle |
+| Lisez-moi | Mode d'emploi, derniers indices collés (formules), points de vigilance | modèle |
 | Société | Raison sociale, signataire des courriers, réglages Pennylane (listes déroulantes) | cabinet |
-| Baux | 40 lignes prêtes (capacité réglable à la création). Un local / bail par ligne, dans l'ordre d'arrivée. Colonne Contrôles : « OK » ou anomalies | cabinet (cellules jaunes) |
-| Indices | Grille de saisie : une ligne par année (2000–2035), quatre colonnes T1..T4 par série (ILC, ILAT, ICC, IRL). Une cellule vide = indice non publié | cabinet, ou `refresh` en phase 2 |
-| Révisions | 40 × 12 échéances pré-câblées ; celles d'un bail s'activent dès sa saisie. Indices, coefficient, **Décision**, loyer retenu, TVA, TTC, **statut**, **Consigne (à faire)**, Appliqué ?, dates | formules ; cabinet pour les colonnes jaunes |
-| Alertes | Une ligne par bail : loyer actuel, prochaine révision, indice publié ?, révisions à facturer, gelées, action, consigne | formules |
-| Pennylane | Une ligne par bail : corps JSON complet de l'abonnement (phase 2) | formules |
+| Récapitulatif | Une ligne par onglet de bail : nom d'onglet en colonne A, le reste en formules (loyer actuel, prochaine révision, indice publié ?, à facturer, gelées, action, consigne, contrôles). Total des loyers en bas | cabinet (colonne A) |
+| Indices | Quatre zones de collage au format de l'export insee.fr (Période / valeur / date JO). Contrôle des doublons | cabinet (collage), ou `refresh` |
+| Grille indices | Vue année × trimestre des valeurs collées | formules |
+| Modèle | Fiche de bail vierge : clic droit > Déplacer ou copier > Créer une copie, renommer avec l'ID du bail | — |
+| *Un onglet par bail* | Paramètres (lignes 3–24), situation actuelle (loyer actuel, prochaine révision, action…), tableau de 12 révisions avec **Décision**, loyer retenu, TVA, TTC, **statut**, **Consigne (à faire)**, Appliqué ?, dates | cabinet (cellules jaunes) |
+| Pennylane | Une ligne par ligne du récapitulatif : corps JSON complet de l'abonnement (phase 2) | formules |
 
-Règles d'usage : ne pas trier ni insérer de lignes dans Baux (les décisions de Révisions sont attachées à la
-position) ; filtrer Révisions sur `Actif = 1` pour masquer les échéances hors bail ; les lignes sans bail restent
-vides en bas de feuille. Taille du fichier : ~200 Ko, recalcul instantané.
+Deux règles : l'ID bail de la fiche doit être égal au nom de l'onglet (le récapitulatif le contrôle) ; ne pas
+modifier la structure des fiches (lignes 3 à 24 et tableau), le récapitulatif et le script y lisent des cellules fixes.
+
+| Brique | État | Détail |
+|---|---|---|
+| Import INSEE | ✔ testé sur un export réel | `fetch-indices --fichier <export>.xlsx` lit la feuille `valeurs_trimestrielles` (période, valeur, date JO). Le cache contient l'ILC réel 2005-T1 → 2026-T1. Appel API SDMX codé, non testé en réel (réseau bloqué ici). |
+| Calcul des révisions | ✔ | Chaînée ou base fixe, périodicité 1/2/3 ans, plafond optionnel sur les années couvertes, baisse appliquée si l'indice recule, gel avec ou sans rattrapage. |
+| Contre-épreuve | ✔ | Moteur Python indépendant ; test qui recalcule le classeur de démo avec LibreOffice et compare cellule à cellule (4 fiches, 30 échéances dont 2 gels, récapitulatif, Pennylane), 0 écart. |
+| Courriers | ✔ | Un PDF par échéance à notifier (révision, gel, attente d'indice), texte dans `config/courrier_modele.json`, `--marquer` inscrit la date d'envoi dans la fiche. |
+| Pennylane | ✔ schéma officiel, envoi à tester | Corps conforme à l'OpenAPI du 2026-05-27, réglages dans Société, identifiant d'abonnement mémorisé dans la fiche après création. |
 
 ## Installation et premier usage
 
 ```bash
 pip install -r requirements.txt
-python -m indexation_loyer init "SCI DES HALLES" --siren 123456789 [--baux config/baux_modele.csv] [--max-baux 40]
-#   -> suivi/SCI_DES_HALLES_indexation_loyers.xlsx : saisir Baux et Indices dans Excel, c'est tout
-# phase 2 :
-python -m indexation_loyer fetch-indices                      # interroge l'INSEE, remplit le cache
-python -m indexation_loyer refresh --tous                     # écrit les indices du cache dans la grille de chaque classeur
+python -m indexation_loyer init "SCI DES HALLES" --siren 123456789 [--baux config/baux_modele.csv]
+#   -> suivi/SCI_DES_HALLES_indexation_loyers.xlsx : dupliquer le Modèle par bail, coller les indices, c'est tout
+# alimentation des indices par le script :
+python -m indexation_loyer fetch-indices --fichier serie_001532540_10092026.xlsx   # import d'un export insee.fr
+python -m indexation_loyer fetch-indices                      # ou : interroge l'API INSEE
+python -m indexation_loyer refresh --tous                     # réécrit les zones de collage de chaque classeur
 python -m indexation_loyer courriers "SCI DES HALLES"         # PDF pour chaque échéance à notifier (--marquer inscrit la date d'envoi)
 python -m indexation_loyer pennylane "SCI DES HALLES"         # écrit out/*.json, n'envoie rien
 python -m indexation_loyer demo                               # classeur de démonstration à valeurs FICTIVES
@@ -151,7 +159,8 @@ config/             series_insee.json · pennylane_mapping.json · courrier_mode
 data/indices/       indices_insee.csv (cache, commité par le workflow hebdomadaire)
 suivi/              classeurs clients (ignorés par git : données nominatives)
 demo/               DEMO_SCI_EXEMPLE_valeurs_fictives.xlsx
-tests/              22 tests, dont la parité LibreOffice ↔ moteur Python et la génération des PDF
+tests/fixtures/     réponse SDMX synthétique · export xlsx insee.fr réel (ILC, 10/09/2026)
+tests/              23 tests, dont la parité LibreOffice ↔ moteur Python et la génération des PDF
 .github/workflows/  indices.yml : fetch-indices chaque lundi + commit du cache
 ```
 
