@@ -1,0 +1,43 @@
+{
+  "_commentaire": "Identifiants (idbank) des séries de la Banque de données macroéconomiques (BDM) de l'INSEE. 'mot_cle_titre' sert de garde-fou : si le titre renvoyé par l'INSEE ne le contient pas, la série est rejetée (protection contre un idbank erroné). Les 3 premiers idbanks ont été recoupés avec les pages insee.fr/fr/statistiques/serie/<idbank> ; celui de l'IRL est à confirmer au premier appel (le contrôle de titre le fera).",
+  "series": {
+    "ILC": {
+      "idbank": "001532540",
+      "libelle": "Indice des loyers commerciaux (ILC) - Base 100 au 1er trimestre 2008",
+      "mot_cle_titre": "loyers commerciaux",
+      "frequence": "T",
+      "base": "100 au T1 2008",
+      "usage": "Baux commerciaux (activités commerciales et artisanales) - art. L145-34 et L145-38 C. com."
+    },
+    "ILAT": {
+      "idbank": "001617112",
+      "libelle": "Indice des loyers des activités tertiaires (ILAT) - Base 100 au 1er trimestre 2010",
+      "mot_cle_titre": "activités tertiaires",
+      "frequence": "T",
+      "base": "100 au T1 2010",
+      "usage": "Baux commerciaux et professionnels : bureaux, professions libérales, logistique"
+    },
+    "ICC": {
+      "idbank": "000008630",
+      "libelle": "Indice du coût de la construction des immeubles à usage d'habitation (ICC) - Base 100 au 4e trimestre 1953",
+      "mot_cle_titre": "coût de la construction",
+      "frequence": "T",
+      "base": "100 au T4 1953",
+      "usage": "Baux anciens (clauses d'échelle mobile antérieures à la loi Pinel) et baux hors statut"
+    },
+    "IRL": {
+      "idbank": "001515333",
+      "libelle": "Indice de référence des loyers (IRL) - Base 100 au 4e trimestre 1998",
+      "mot_cle_titre": "référence des loyers",
+      "frequence": "T",
+      "base": "100 au T4 1998",
+      "usage": "Baux d'habitation (loi du 6 juillet 1989) - idbank à confirmer au premier appel"
+    }
+  },
+  "api": {
+    "sdmx_base_url": "https://bdm.insee.fr/series/sdmx/data/SERIES_BDM/",
+    "csv_fallback_url": "https://www.insee.fr/fr/statistiques/serie/telecharger/csv/",
+    "documentation": "https://www.insee.fr/fr/information/2862759",
+    "portail_api": "https://portail-api.insee.fr/catalog/api/eebab65a-9aef-4da5-bab6-5a9aefeda552"
+  }
+}

@@ -1,0 +1,31 @@
+name: Mise à jour des indices INSEE
+
+# Chaque lundi 06:30 UTC (les indices trimestriels sortent fin mars / juin / septembre / décembre)
+# et à la demande. Le cache CSV est commité s'il a changé : chaque poste du cabinet récupère
+# les nouvelles valeurs par un simple `git pull` puis `refresh --tous`.
+on:
+  schedule:
+    - cron: "30 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q tests
+      - name: Interroger la BDM INSEE
+        run: python -m indexation_loyer fetch-indices
+      - name: Commiter le cache s'il a changé
+        run: |
+          git config user.name "indexation-loyer bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/indices/indices_insee.csv
+          git diff --cached --quiet && echo "Aucune nouvelle valeur" || git commit -m "indices: mise à jour INSEE $(date -u +%Y-%m-%d)" && git push

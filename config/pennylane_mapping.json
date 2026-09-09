@@ -1,0 +1,45 @@
+{
+  "_commentaire": "Mapping vers le corps de POST /billing_subscriptions (API Pennylane v2). La documentation officielle n'a pas pu être consultée depuis l'environnement de génération : VALIDER chaque nom de champ et chaque énumération sur https://pennylane.readme.io/reference/postbillingsubscriptions avant le premier envoi réel. Le client refuse d'envoyer tant que 'schema_valide' est false.",
+  "schema_valide": false,
+  "base_url": "https://app.pennylane.com/api/external/v2",
+  "endpoint": "/billing_subscriptions",
+  "auth_header": "Authorization",
+  "auth_prefix": "Bearer ",
+  "variable_environnement_token": "PENNYLANE_API_TOKEN",
+  "recurrence_par_periodicite": {
+    "Mensuelle": {"type": "monthly", "day_of_month": 1},
+    "Trimestrielle": {"type": "quarterly", "day_of_month": 1},
+    "Semestrielle": {"type": "semiannual", "day_of_month": 1},
+    "Annuelle": {"type": "yearly", "day_of_month": 1}
+  },
+  "vat_rate_par_taux": {
+    "20": "FR_200",
+    "10": "FR_100",
+    "5.5": "FR_55",
+    "2.1": "FR_21",
+    "0": "exempt"
+  },
+  "corps": {
+    "customer_id": "{customer_id}",
+    "start": "{date_debut}",
+    "currency": "EUR",
+    "mode": "draft",
+    "recurrence": "{recurrence}",
+    "invoice_lines": "{lignes}"
+  },
+  "ligne_loyer": {
+    "label": "{libelle}",
+    "quantity": 1,
+    "unit": "mois",
+    "raw_currency_unit_price": "{prix_unitaire_ht}",
+    "vat_rate": "{vat_rate}",
+    "product_id": "{product_id}"
+  },
+  "ligne_charges": {
+    "label": "Provision sur charges",
+    "quantity": 1,
+    "unit": "mois",
+    "raw_currency_unit_price": "{charges_ht}",
+    "vat_rate": "{vat_rate}"
+  }
+}

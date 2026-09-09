@@ -1,0 +1,3 @@
+ID bail;Local (désignation / adresse);Locataire;Type de bail;Date de prise d'effet;Durée (ans);Loyer initial annuel HT;Charges annuelles HT;TVA (%);Périodicité de facturation;Indice;Trimestre indice de base;Périodicité de révision (ans);Méthode;Plafond annuel (%) – optionnel;Pennylane customer_id;Pennylane product_id;Notes
+B01;Boutique 12 rue Exemple;Locataire SAS;Commercial;01/04/2021;9;24000;2400;20;Mensuelle;ILC;2020-T4;1;Chaînée;;;;Clause d'échelle mobile annuelle
+B02;Bureaux 2e étage;Cabinet Exemple;Professionnel;01/10/2022;9;36000;0;20;Trimestrielle;ILAT;2022-T2;3;Base fixe;;;;Révision triennale

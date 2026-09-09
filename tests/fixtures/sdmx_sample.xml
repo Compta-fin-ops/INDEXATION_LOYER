@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Extrait SYNTHÉTIQUE au format SDMX-ML StructureSpecificData de la BDM INSEE.
+     Les VALEURS SONT FICTIVES : ce fichier ne sert qu'à tester le parseur. -->
+<message:StructureSpecificData xmlns:message="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message"
+    xmlns:common="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/common"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <message:Header>
+    <message:ID>SERIES_BDM</message:ID>
+    <message:Test>false</message:Test>
+    <message:Prepared>2026-09-09T10:00:00</message:Prepared>
+    <message:Sender id="FR1"/>
+  </message:Header>
+  <message:DataSet action="Replace" xsi:type="ns1:DataSetType">
+    <Series IDBANK="001532540" FREQ="T" TITLE_FR="Indice des loyers commerciaux (ILC) - Base 100 au 1er trimestre 2008" LAST_UPDATE="2026-06-24" UNIT_MEASURE="SO" DECIMALS="2">
+      <Obs TIME_PERIOD="2025-Q1" OBS_VALUE="120.00" OBS_STATUS="A"/>
+      <Obs TIME_PERIOD="2025-Q2" OBS_VALUE="120.50" OBS_STATUS="A"/>
+      <Obs TIME_PERIOD="2025-Q3" OBS_VALUE="121.00" OBS_STATUS="A"/>
+      <Obs TIME_PERIOD="2025-Q4" OBS_VALUE="121.50" OBS_STATUS="A"/>
+      <Obs TIME_PERIOD="2026-Q1" OBS_VALUE="122.00" OBS_STATUS="P"/>
+    </Series>
+    <Series IDBANK="000008630" FREQ="T" TITLE_FR="Indice du coût de la construction des immeubles à usage d'habitation (ICC) - Base 100 au 4e trimestre 1953" LAST_UPDATE="2026-06-24" UNIT_MEASURE="SO" DECIMALS="0">
+      <Obs TIME_PERIOD="2025-Q4" OBS_VALUE="2000" OBS_STATUS="A"/>
+      <Obs TIME_PERIOD="2026-Q1" OBS_VALUE="2010" OBS_STATUS="A"/>
+    </Series>
+  </message:DataSet>
+</message:StructureSpecificData>

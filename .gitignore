@@ -1,0 +1,10 @@
+# Classeurs clients : données nominatives, ne pas versionner
+suivi/*.xlsx
+suivi/*.bak.xlsx
+demo/*.bak.xlsx
+out/*.json
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
