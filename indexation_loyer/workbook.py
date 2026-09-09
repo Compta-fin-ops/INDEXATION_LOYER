@@ -53,6 +53,9 @@ FMT_INDICE = "0.00"
 MAX_LIGNES_BAUX = 200      # plage couverte par les validations de données
 
 
+SOC_LIGNES: dict[str, int] = {}   # libellé -> ligne de la feuille Société (rempli à la construction)
+
+
 @dataclass
 class Societe:
     nom: str
@@ -65,6 +68,9 @@ class Societe:
     signataire: str = ""              # ex. « M. Jean Dupont »
     qualite_signataire: str = "Gérant"
     ville_signature: str = ""
+    pl_mode: str = "awaiting_validation"          # Pennylane : factures générées en brouillon
+    pl_payment_conditions: str = "upon_receipt"
+    pl_payment_method: str = "offline"
     demo: bool = False
 
 
@@ -89,7 +95,7 @@ COLS_BAUX = [
     ("Loyer initial annuel HT", 16), ("Charges annuelles HT", 14), ("TVA (%)", 8),
     ("Périodicité de facturation", 16), ("Indice", 8), ("Trimestre indice de base", 14),
     ("Périodicité de révision (ans)", 12), ("Méthode", 11), ("Plafond annuel (%) – optionnel", 14),
-    ("Pennylane customer_id", 14), ("Pennylane product_id", 14), ("Notes", 30), ("Contrôles", 40),
+    ("Pennylane customer_id", 14), ("Pennylane product_id", 14), ("Pennylane subscription_id", 14), ("Notes", 30), ("Contrôles", 40),
 ]
 # lettres utiles
 B = {nom: get_column_letter(i + 1) for i, (nom, _) in enumerate(COLS_BAUX)}
@@ -100,6 +106,7 @@ B_LOYER, B_CHARGES, B_TVA = B["Loyer initial annuel HT"], B["Charges annuelles H
 B_PERFACT, B_INDICE, B_TBASE = B["Périodicité de facturation"], B["Indice"], B["Trimestre indice de base"]
 B_PERREV, B_METHODE, B_PLAFOND = B["Périodicité de révision (ans)"], B["Méthode"], B["Plafond annuel (%) – optionnel"]
 B_CUST, B_PROD, B_NOTES, B_CTRL = B["Pennylane customer_id"], B["Pennylane product_id"], B["Notes"], B["Contrôles"]
+B_SUBSCR = B["Pennylane subscription_id"]
 
 COLS_INDICES = [("Série", 8), ("Période", 10), ("Valeur", 10), ("Statut obs.", 9), ("Dernière MAJ INSEE", 14),
                 ("Source", 12), ("Date extraction", 12), ("Variation annuelle", 11)]
@@ -126,10 +133,11 @@ COLS_ALERTES = [
 A = {nom: get_column_letter(i + 1) for i, (nom, _) in enumerate(COLS_ALERTES)}
 
 COLS_PL = [
-    ("ID bail", 10), ("Locataire", 22), ("customer_id", 12), ("product_id", 12), ("Libellé de ligne", 34),
-    ("Périodicité", 12), ("recurrence.type", 12), ("Prix unitaire HT / échéance", 14),
-    ("Charges HT / échéance", 13), ("TVA (%)", 8), ("vat_rate (code Pennylane)", 12),
-    ("Date de début (1er du mois suivant)", 14), ("Aperçu du corps JSON (POST /billing_subscriptions)", 90),
+    ("ID bail", 10), ("Locataire", 22), ("customer_id", 12), ("product_id", 11), ("label (abonnement)", 30),
+    ("Périodicité", 12), ("recurring_rule.type", 11), ("interval", 8), ("unit", 9),
+    ("Prix unitaire HT / échéance", 14), ("Charges HT / échéance", 13), ("TVA (%)", 8), ("vat_rate", 9),
+    ("mode", 16), ("payment_conditions", 16), ("payment_method", 14), ("start (1er du mois suivant)", 13),
+    ("subscription_id existant", 13), ("Corps JSON – POST /api/external/v2/billing_subscriptions", 100),
 ]
 P = {nom: get_column_letter(i + 1) for i, (nom, _) in enumerate(COLS_PL)}
 
@@ -251,13 +259,23 @@ def _feuille_societe(wb: Workbook, s: Societe, aujourdhui: date) -> None:
               ("Régime TVA des loyers", s.regime_tva), ("Identifiant société Pennylane", s.pennylane_company),
               ("Contact cabinet", s.contact), ("Adresse du bailleur (courriers)", s.adresse), ("Signataire des courriers", s.signataire),
               ("Qualité du signataire", s.qualite_signataire), ("Ville de signature", s.ville_signature),
+              ("Pennylane – mode des factures", s.pl_mode), ("Pennylane – conditions de paiement", s.pl_payment_conditions),
+              ("Pennylane – moyen de paiement", s.pl_payment_method),
               ("Date de génération", aujourdhui), ("Mode démonstration", "OUI" if s.demo else "non")]
+    listes = {"Pennylane – mode des factures": ("awaiting_validation", "finalized"),
+              "Pennylane – conditions de paiement": ("upon_receipt", "7_days", "15_days", "30_days", "30_days_end_of_month", "45_days", "45_days_end_of_month", "60_days"),
+              "Pennylane – moyen de paiement": ("offline", "gocardless_direct_debit", "pro_account_sepa_core")}
     for i, (k, v) in enumerate(lignes, start=1):
         ws.cell(row=i, column=1, value=k).font = FONT_GRAS
         c = ws.cell(row=i, column=2, value=v)
         c.fill = FILL_SAISIE
         if isinstance(v, date):
             c.number_format = FMT_DATE
+        if k in listes:
+            dv = DataValidation(type="list", formula1='"' + ",".join(listes[k]) + '"', allow_blank=False)
+            dv.add(f"B{i}")
+            ws.add_data_validation(dv)
+        SOC_LIGNES[k] = i
 
 
 # --- Baux --------------------------------------------------------------------
@@ -271,7 +289,7 @@ def _feuille_baux(wb: Workbook, baux: list[Bail]) -> None:
             B_CHARGES: b.charges_annuelles_ht, B_TVA: b.tva_pct, B_PERFACT: b.periodicite_facturation,
             B_INDICE: b.indice, B_TBASE: b.trimestre_base, B_PERREV: b.periodicite_revision_ans,
             B_METHODE: b.methode, B_PLAFOND: b.plafond_annuel_pct, B_CUST: b.pennylane_customer_id or None,
-            B_PROD: b.pennylane_product_id or None, B_NOTES: b.notes or None,
+            B_PROD: b.pennylane_product_id or None, B_SUBSCR: b.pennylane_subscription_id or None, B_NOTES: b.notes or None,
         }
         for col, v in valeurs.items():
             ws[f"{col}{i}"] = v
@@ -504,48 +522,59 @@ def _feuille_alertes(wb: Workbook, baux: list[Bail]) -> None:
 def _feuille_pennylane(wb: Workbook, baux: list[Bail]) -> None:
     ws = wb.create_sheet("Pennylane")
     _entetes(ws, COLS_PL)
+    soc = lambda lib: f"Société!$B${SOC_LIGNES[lib]}"
     for i, b in enumerate(baux, start=2):
         c = lambda nom: f"{P[nom]}{i}"
         lk = lambda col: _lookup(col, i)
         al = lambda nom: f"INDEX(Alertes!${A[nom]}:${A[nom]},MATCH({c('ID bail')},Alertes!$A:$A,0))"
-        ech_par_an = (f'IF({c("Périodicité")}="Mensuelle",12,IF({c("Périodicité")}="Trimestrielle",4,'
-                      f'IF({c("Périodicité")}="Semestrielle",2,1)))')
+        per = c("Périodicité")
+        ech_par_an = f'IF({per}="Mensuelle",12,IF({per}="Trimestrielle",4,IF({per}="Semestrielle",2,1)))'
         ws[c("ID bail")] = b.id
         ws[c("Locataire")] = f"={lk(B_LOCATAIRE)}"
         ws[c("customer_id")] = f'=IF({lk(B_CUST)}="","À RENSEIGNER",{lk(B_CUST)})'
         ws[c("product_id")] = f'=IF({lk(B_PROD)}="","",{lk(B_PROD)})'
-        ws[c("Libellé de ligne")] = f'="Loyer "&{lk(B_LOCAL)}&" – échéance "&LOWER({c("Périodicité")})'
-        ws[c("Périodicité")] = f"={lk(B_PERFACT)}"
-        ws[c("recurrence.type")] = (f'=IF({c("Périodicité")}="Mensuelle","monthly",IF({c("Périodicité")}="Trimestrielle","quarterly",'
-                                    f'IF({c("Périodicité")}="Semestrielle","semiannual","yearly")))')
+        ws[c("label (abonnement)")] = f'="Loyer "&{lk(B_LOCAL)}'
+        ws[per] = f"={lk(B_PERFACT)}"
+        ws[c("recurring_rule.type")] = f'=IF({per}="Annuelle","yearly","monthly")'
+        ws[c("interval")] = f'=IF({per}="Mensuelle",1,IF({per}="Trimestrielle",3,IF({per}="Semestrielle",6,1)))'
+        ws[c("unit")] = f'=IF({per}="Mensuelle","mois",IF({per}="Trimestrielle","trimestre",IF({per}="Semestrielle","semestre","an")))'
         ws[c("Prix unitaire HT / échéance")] = f'=ROUND({al("Loyer actuel (annuel HT)")}/{ech_par_an},2)'
         ws[c("Charges HT / échéance")] = f'=ROUND(IF({lk(B_CHARGES)}="",0,{lk(B_CHARGES)})/{ech_par_an},2)'
         ws[c("TVA (%)")] = f"={lk(B_TVA)}"
-        ws[c("vat_rate (code Pennylane)")] = (f'=IF({c("TVA (%)")}=20,"FR_200",IF({c("TVA (%)")}=10,"FR_100",'
-                                              f'IF({c("TVA (%)")}=5.5,"FR_55",IF({c("TVA (%)")}=2.1,"FR_21","exempt"))))')
-        ws[c("Date de début (1er du mois suivant)")] = "=DATE(YEAR(TODAY()),MONTH(TODAY())+1,1)"
-        d = c("Date de début (1er du mois suivant)")
+        ws[c("vat_rate")] = (f'=IF({c("TVA (%)")}=20,"FR_200",IF({c("TVA (%)")}=10,"FR_100",'
+                             f'IF({c("TVA (%)")}=5.5,"FR_55",IF({c("TVA (%)")}=2.1,"FR_21","exempt"))))')
+        ws[c("mode")] = f"={soc('Pennylane – mode des factures')}"
+        ws[c("payment_conditions")] = f"={soc('Pennylane – conditions de paiement')}"
+        ws[c("payment_method")] = f"={soc('Pennylane – moyen de paiement')}"
+        ws[c("start (1er du mois suivant)")] = "=DATE(YEAR(TODAY()),MONTH(TODAY())+1,1)"
+        ws[c("subscription_id existant")] = f'=IF({lk(B_SUBSCR)}="","",{lk(B_SUBSCR)})'
+        d = c("start (1er du mois suivant)")
         iso = f'YEAR({d})&"-"&TEXT(MONTH({d}),"00")&"-"&TEXT(DAY({d}),"00")'
-        num = lambda ref: f'SUBSTITUTE(TEXT({ref},"0.00"),",",".")'
-        ligne_charges = (f'IF({c("Charges HT / échéance")}>0,", {{""label"": ""Provision sur charges"", ""quantity"": 1, '
-                         f'""raw_currency_unit_price"": "&{num(c("Charges HT / échéance"))}&", ""vat_rate"": """&{c("vat_rate (code Pennylane)")}&"""}}","")')
-        ws[c("Aperçu du corps JSON (POST /billing_subscriptions)")] = (
-            f'="{{""customer_id"": "&{c("customer_id")}&", ""start"": """&{iso}&""", ""currency"": ""EUR"", '
-            f'""recurrence"": {{""type"": """&{c("recurrence.type")}&""", ""day_of_month"": 1}}, '
-            f'""invoice_lines"": [{{""label"": """&{c("Libellé de ligne")}&""", ""quantity"": 1, '
-            f'""raw_currency_unit_price"": "&{num(c("Prix unitaire HT / échéance"))}&", ""vat_rate"": """&{c("vat_rate (code Pennylane)")}&""""'
-            f'&IF({c("product_id")}<>"",", ""product_id"": "&{c("product_id")},"")&"}}"&{ligne_charges}&"]}}"'
+        num = lambda ref: f'SUBSTITUTE(TEXT({ref},"0.00"),",",".")'   # prix = chaîne à 2 décimales (schéma)
+        q = '""'                                                     # guillemet JSON dans une chaîne Excel
+        ligne_loyer = (f'"{{{q}label{q}: {q}Loyer "&LOWER({per})&" – "&{lk(B_LOCAL)}&"{q}, {q}quantity{q}: 1, {q}unit{q}: {q}"&{c("unit")}&"{q}, '
+                       f'{q}raw_currency_unit_price{q}: {q}"&{num(c("Prix unitaire HT / échéance"))}&"{q}, {q}vat_rate{q}: {q}"&{c("vat_rate")}&"{q}"'
+                       f'&IF({c("product_id")}<>"",", {q}product_id{q}: "&{c("product_id")},"")&"}}"')
+        ligne_charges = (f'IF({c("Charges HT / échéance")}>0,", {{{q}label{q}: {q}Provision sur charges{q}, {q}quantity{q}: 1, {q}unit{q}: {q}"&{c("unit")}&"{q}, '
+                         f'{q}raw_currency_unit_price{q}: {q}"&{num(c("Charges HT / échéance"))}&"{q}, {q}vat_rate{q}: {q}"&{c("vat_rate")}&"{q}}}","")')
+        rule = (f'"{{{q}type{q}: {q}"&{c("recurring_rule.type")}&"{q}, {q}interval{q}: "&{c("interval")}'
+                f'&IF({c("recurring_rule.type")}="monthly",", {q}day_of_month{q}: 1","")&"}}"')
+        ws[c("Corps JSON – POST /api/external/v2/billing_subscriptions")] = (
+            f'="{{{q}customer_id{q}: "&{c("customer_id")}&", {q}label{q}: {q}"&{c("label (abonnement)")}&"{q}, {q}start{q}: {q}"&{iso}&"{q}, '
+            f'{q}mode{q}: {{{q}type{q}: {q}"&{c("mode")}&"{q}}}, {q}payment_conditions{q}: {q}"&{c("payment_conditions")}&"{q}, '
+            f'{q}payment_method{q}: {q}"&{c("payment_method")}&"{q}, {q}recurring_rule{q}: "&{rule}&", '
+            f'{q}customer_invoice_data{q}: {{{q}currency{q}: {q}EUR{q}, {q}language{q}: {q}fr_FR{q}, {q}pdf_invoice_subject{q}: {q}"&{c("label (abonnement)")}&"{q}, '
+            f'{q}invoice_lines{q}: ["&{ligne_loyer}&{ligne_charges}&"]}}}}"'
         )
         for nom in ("Prix unitaire HT / échéance", "Charges HT / échéance"):
             ws[c(nom)].number_format = FMT_EUR
-        ws[c("Date de début (1er du mois suivant)")].number_format = FMT_DATE
-        ws[c("Aperçu du corps JSON (POST /billing_subscriptions)")].alignment = Alignment(wrap_text=False)
+        ws[c("start (1er du mois suivant)")].number_format = FMT_DATE
         for nom, _ in COLS_PL:
             ws[c(nom)].border = BORDURE
     n = len(baux) + 3
-    ws.cell(row=n, column=1, value="Schéma indicatif : les noms de champs (recurrence, invoice_lines, raw_currency_unit_price, vat_rate) "
-                                    "sont à valider contre https://pennylane.readme.io/reference/postbillingsubscriptions avant tout envoi. "
-                                    "Le mapping est modifiable dans config/pennylane_mapping.json.").font = FONT_GRIS
+    ws.cell(row=n, column=1, value="Schéma : OpenAPI Pennylane Company V2 (POST /billing_subscriptions, mise à jour 2026-05-27). "
+                                    "Mode, conditions et moyen de paiement se règlent dans la feuille Société. L'envoi se fait par la commande "
+                                    "pennylane <société> --push ; l'identifiant créé est inscrit dans Baux (Pennylane subscription_id).").font = FONT_GRIS
 
 
 # =============================================================================
@@ -562,6 +591,9 @@ def lire_classeur(chemin: Path) -> tuple[Societe, list[Bail], Saisies]:
         contact=str(params.get("Contact cabinet") or ""), demo=str(params.get("Mode démonstration")).upper() == "OUI",
         adresse=str(params.get("Adresse du bailleur (courriers)") or ""), signataire=str(params.get("Signataire des courriers") or ""),
         qualite_signataire=str(params.get("Qualité du signataire") or "Gérant"), ville_signature=str(params.get("Ville de signature") or ""),
+        pl_mode=str(params.get("Pennylane – mode des factures") or "awaiting_validation"),
+        pl_payment_conditions=str(params.get("Pennylane – conditions de paiement") or "upon_receipt"),
+        pl_payment_method=str(params.get("Pennylane – moyen de paiement") or "offline"),
     )
     ws_b = wb["Baux"]
     entetes = [ws_b.cell(row=1, column=c).value for c in range(1, len(COLS_BAUX) + 1)]
@@ -587,6 +619,7 @@ def lire_classeur(chemin: Path) -> tuple[Societe, list[Bail], Saisies]:
             plafond_annuel_pct=float(v(B_PLAFOND)) if v(B_PLAFOND) not in (None, "") else None,
             pennylane_customer_id=str(v(B_CUST) or "").replace(".0", "") if v(B_CUST) is not None else "",
             pennylane_product_id=str(v(B_PROD) or "").replace(".0", "") if v(B_PROD) is not None else "",
+            pennylane_subscription_id=str(v(B_SUBSCR) or "").replace(".0", "") if v(B_SUBSCR) is not None else "",
             notes=str(v(B_NOTES) or ""),
         ))
     saisies = Saisies()

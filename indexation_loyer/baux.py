@@ -51,6 +51,7 @@ class Bail:
     type_bail: str = "Commercial"
     pennylane_customer_id: str = ""
     pennylane_product_id: str = ""
+    pennylane_subscription_id: str = ""  # renseigné par la commande pennylane --push
     notes: str = ""
     erreurs: list[str] = field(default_factory=list)
 

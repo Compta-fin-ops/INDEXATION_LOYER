@@ -36,6 +36,11 @@
   },
   "api": {
     "sdmx_base_url": "https://bdm.insee.fr/series/sdmx/data/SERIES_BDM/",
+    "sdmx_base_url_api_insee": "https://api.insee.fr/series/BDM/V1/data/SERIES_BDM/",
+    "api_insee_variable_token": "INSEE_API_TOKEN",
+    "api_insee_en_tete": "Authorization",
+    "api_insee_prefixe": "Bearer ",
+    "_api_insee": "Point d'accès alternatif api.insee.fr/series/BDM (commande fetch-indices --api-insee). Il exige un jeton obtenu sur le portail INSEE ; le nom de l'en-tête (Authorization: Bearer … historiquement, X-INSEE-Api-Key-Integration sur le nouveau portail) est à confirmer : ajuster api_insee_en_tete / api_insee_prefixe si l'INSEE répond 401.",
     "csv_fallback_url": "https://www.insee.fr/fr/statistiques/serie/telecharger/csv/",
     "documentation": "https://www.insee.fr/fr/information/2862759",
     "portail_api": "https://portail-api.insee.fr/catalog/api/eebab65a-9aef-4da5-bab6-5a9aefeda552"

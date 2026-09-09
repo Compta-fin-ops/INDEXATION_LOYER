@@ -134,10 +134,18 @@ def test_parite_libreoffice_moteur_python(classeur_demo, tmp_path):
     assert ws_a[f"{A['Trimestre attendu']}2"].value == "2026-T4"
     assert ws_a[f"{A['Action']}2"].value.startswith("⚠ Facturer")
 
-    # 4. Pennylane : le JSON d'aperçu est valide et cohérent
+    # 4. Pennylane : le JSON construit par formules Excel est identique au corps du client Python
     import json
+    from indexation_loyer import pennylane
+    mapping = pennylane.charger_mapping()
     ws_p = wb["Pennylane"]
-    corps = json.loads(ws_p[f"{P['Aperçu du corps JSON (POST /billing_subscriptions)']}2"].value)
-    assert corps["customer_id"] == 100001 and corps["recurrence"]["type"] == "monthly"
-    assert len(corps["invoice_lines"]) == 2  # loyer + charges
-    assert abs(corps["invoice_lines"][0]["raw_currency_unit_price"] - calcul.loyer_actuel(baux[0], calcul.calculer(baux[0], indices, baux[0].date_fin, AUJOURDHUI, decisions), AUJOURDHUI) / 12) < 0.01
+    societe, _, _ = lire_classeur(classeur_demo)
+    reglages = pennylane.ReglagesPennylane(societe.pl_mode, societe.pl_payment_conditions, societe.pl_payment_method)
+    for r in range(2, 6):
+        excel = json.loads(ws_p[f"{P['Corps JSON – POST /api/external/v2/billing_subscriptions']}{r}"].value.replace("À RENSEIGNER", "0"))
+        b = next(b for b in baux if b.id == ws_p[f"A{r}"].value)
+        python = pennylane.construire_abonnement(b, demo.indices_fictifs(AUJOURDHUI), mapping, reglages,
+                                                 aujourdhui=date.today(), decisions=decisions).corps   # TODAY() côté LibreOffice
+        python["customer_invoice_data"].pop("special_mention", None)
+        python.setdefault("customer_id", 0)          # Excel affiche « À RENSEIGNER », le client omet le champ
+        assert excel == python, b.id

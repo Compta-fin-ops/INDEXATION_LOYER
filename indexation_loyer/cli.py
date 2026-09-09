@@ -47,7 +47,7 @@ def _lire_baux_csv(chemin: Path) -> list[Bail]:
         "Charges annuelles HT": "charges_annuelles_ht", "TVA (%)": "tva_pct", "Périodicité de facturation": "periodicite_facturation",
         "Indice": "indice", "Trimestre indice de base": "trimestre_base", "Périodicité de révision (ans)": "periodicite_revision_ans",
         "Méthode": "methode", "Plafond annuel (%) – optionnel": "plafond_annuel_pct", "Pennylane customer_id": "pennylane_customer_id",
-        "Pennylane product_id": "pennylane_product_id", "Notes": "notes",
+        "Pennylane product_id": "pennylane_product_id", "Pennylane subscription_id": "pennylane_subscription_id", "Notes": "notes",
     }
     baux = []
     with open(chemin, encoding="utf-8-sig", newline="") as f:
@@ -70,7 +70,8 @@ def _lire_baux_csv(chemin: Path) -> list[Bail]:
 def cmd_fetch(args) -> int:
     try:
         fusion, delta = insee.mettre_a_jour_cache(
-            codes=args.series, fichier_csv=args.fichier, serie_forcee=args.serie, start_period=args.depuis)
+            codes=args.series, fichier_csv=args.fichier, serie_forcee=args.serie, start_period=args.depuis,
+            api_insee=args.api_insee)
     except (RuntimeError, ValueError) as e:
         print(f"Échec : {e}")
         return 1
@@ -132,24 +133,36 @@ def _indices_du_classeur(chemin: Path) -> list:
 
 def cmd_pennylane(args) -> int:
     chemin = chemin_classeur(args.societe, Path(args.dossier))
-    societe, baux, _ = lire_classeur(chemin)
+    societe, baux, saisies = lire_classeur(chemin)
     observations = _indices_du_classeur(chemin)
     mapping = pennylane.charger_mapping()
-    _, _, saisies = lire_classeur(chemin)
-    abonnements = [pennylane.construire_abonnement(b, observations, mapping, decisions=saisies.decision) for b in baux]
+    reglages = pennylane.ReglagesPennylane(societe.pl_mode, societe.pl_payment_conditions, societe.pl_payment_method)
+    abonnements = [pennylane.construire_abonnement(b, observations, mapping, reglages, decisions=saisies.decision) for b in baux]
     chemins = pennylane.ecrire_dry_run(abonnements, DOSSIER_OUT, societe.nom)
     for a in abonnements:
-        print(f"  {a.bail_id:<10} {a.locataire:<30} {a.corps.get('invoice_lines', [{}])[0].get('raw_currency_unit_price', '?'):>10} HT / échéance"
+        prix = a.corps["customer_invoice_data"]["invoice_lines"][0]["raw_currency_unit_price"]
+        deja = f"   (abonnement {a.subscription_id_existant} déjà enregistré)" if a.subscription_id_existant else ""
+        print(f"  {a.bail_id:<10} {a.locataire:<30} {prix:>10} HT / échéance{deja}"
               + (f"   ⚠ {' ; '.join(a.avertissements)}" if a.avertissements else ""))
     print(f"{len(chemins)} corps JSON écrits dans {DOSSIER_OUT} (aperçu, rien n'a été envoyé)")
-    if args.push:
-        token = os.environ.get(mapping["variable_environnement_token"], "")
-        if not token:
-            print(f"Variable {mapping['variable_environnement_token']} absente : envoi impossible.")
-            return 1
-        for bail_id, statut, corps in pennylane.envoyer(abonnements, mapping, token):
-            print(f"  {bail_id}: HTTP {statut} {corps[:200]}")
-    return 0
+    if not args.push:
+        return 0
+    token = os.environ.get(mapping["variable_environnement_token"], "")
+    if not token:
+        print(f"Variable {mapping['variable_environnement_token']} absente : envoi impossible.")
+        return 1
+    crees: dict[str, str] = {}
+    code = 0
+    for bail_id, statut, cree, brut in pennylane.envoyer(abonnements, mapping, token, remplacer=args.remplacer):
+        print(f"  {bail_id}: HTTP {statut} {('-> abonnement ' + cree) if cree else brut[:300]}")
+        if statut == 201 and cree:
+            crees[bail_id] = cree
+        else:
+            code = 1
+    if crees:
+        n = pennylane.enregistrer_subscription_ids(chemin, crees)
+        print(f"{n} identifiant(s) d'abonnement inscrit(s) dans la feuille Baux (sauvegarde .bak créée).")
+    return code
 
 
 def cmd_courriers(args) -> int:
@@ -190,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--depuis", default="2000-Q1", help="startPeriod SDMX (défaut 2000-Q1)")
     f.add_argument("--fichier", type=Path, help="Export CSV/zip insee.fr à importer au lieu d'appeler l'API")
     f.add_argument("--serie", help="Code série à forcer pour --fichier si la ligne idBank manque")
+    f.add_argument("--api-insee", action="store_true", help="Passer par api.insee.fr/series/BDM avec le jeton INSEE_API_TOKEN")
     f.set_defaults(func=cmd_fetch)
 
     i = sp.add_parser("init", help="Crée le classeur d'une société")
@@ -210,7 +224,8 @@ def main(argv: list[str] | None = None) -> int:
 
     pl = sp.add_parser("pennylane", help="Prépare (dry-run) ou envoie (--push) les abonnements de facturation")
     pl.add_argument("societe")
-    pl.add_argument("--push", action="store_true")
+    pl.add_argument("--push", action="store_true", help="Envoie réellement (PENNYLANE_API_TOKEN requis)")
+    pl.add_argument("--remplacer", action="store_true", help="Créer même si un subscription_id est déjà enregistré")
     pl.add_argument("--dossier", default=str(DOSSIER_SUIVI))
     pl.set_defaults(func=cmd_pennylane)
 

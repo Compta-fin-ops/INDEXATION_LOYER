@@ -1,36 +1,49 @@
 {
-  "_commentaire": "Mapping vers le corps de POST /billing_subscriptions (API Pennylane v2). La documentation officielle n'a pas pu être consultée depuis l'environnement de génération : VALIDER chaque nom de champ et chaque énumération sur https://pennylane.readme.io/reference/postbillingsubscriptions avant le premier envoi réel. Le client refuse d'envoyer tant que 'schema_valide' est false.",
-  "schema_valide": false,
+  "_source": "OpenAPI Pennylane « Company V2 » – POST /api/external/v2/billing_subscriptions (page mise à jour le 2026-05-27, fournie par le cabinet). Champs obligatoires : start, mode, payment_conditions, payment_method, recurring_rule, customer_id, customer_invoice_data.invoice_lines. Scope OAuth : billing_subscriptions:all.",
+  "schema_valide": true,
   "base_url": "https://app.pennylane.com/api/external/v2",
   "endpoint": "/billing_subscriptions",
   "auth_header": "Authorization",
   "auth_prefix": "Bearer ",
   "variable_environnement_token": "PENNYLANE_API_TOKEN",
-  "recurrence_par_periodicite": {
-    "Mensuelle": {"type": "monthly", "day_of_month": 1},
-    "Trimestrielle": {"type": "quarterly", "day_of_month": 1},
-    "Semestrielle": {"type": "semiannual", "day_of_month": 1},
-    "Annuelle": {"type": "yearly", "day_of_month": 1}
+  "defauts_societe": {
+    "mode": "awaiting_validation",
+    "payment_conditions": "upon_receipt",
+    "payment_method": "offline"
   },
-  "vat_rate_par_taux": {
-    "20": "FR_200",
-    "10": "FR_100",
-    "5.5": "FR_55",
-    "2.1": "FR_21",
-    "0": "exempt"
+  "enums": {
+    "mode": ["awaiting_validation", "finalized", "email"],
+    "payment_conditions": ["upon_receipt", "7_days", "15_days", "30_days", "30_days_end_of_month", "45_days", "45_days_end_of_month", "60_days"],
+    "payment_method": ["offline", "gocardless_direct_debit", "pro_account_sepa_core"]
   },
+  "recurring_rule_par_periodicite": {
+    "Mensuelle":     {"type": "monthly", "interval": 1, "day_of_month": 1},
+    "Trimestrielle": {"type": "monthly", "interval": 3, "day_of_month": 1},
+    "Semestrielle":  {"type": "monthly", "interval": 6, "day_of_month": 1},
+    "Annuelle":      {"type": "yearly",  "interval": 1}
+  },
+  "unite_par_periodicite": {"Mensuelle": "mois", "Trimestrielle": "trimestre", "Semestrielle": "semestre", "Annuelle": "an"},
+  "vat_rate_par_taux": {"20": "FR_200", "10": "FR_100", "5.5": "FR_55", "2.1": "FR_21", "0": "exempt"},
   "corps": {
     "customer_id": "{customer_id}",
+    "label": "{label}",
     "start": "{date_debut}",
-    "currency": "EUR",
-    "mode": "draft",
-    "recurrence": "{recurrence}",
-    "invoice_lines": "{lignes}"
+    "mode": {"type": "{mode}"},
+    "payment_conditions": "{payment_conditions}",
+    "payment_method": "{payment_method}",
+    "recurring_rule": "{recurring_rule}",
+    "customer_invoice_data": {
+      "currency": "EUR",
+      "language": "fr_FR",
+      "pdf_invoice_subject": "{label}",
+      "special_mention": "{mention_indexation}",
+      "invoice_lines": "{lignes}"
+    }
   },
   "ligne_loyer": {
-    "label": "{libelle}",
+    "label": "{libelle_loyer}",
     "quantity": 1,
-    "unit": "mois",
+    "unit": "{unite}",
     "raw_currency_unit_price": "{prix_unitaire_ht}",
     "vat_rate": "{vat_rate}",
     "product_id": "{product_id}"
@@ -38,7 +51,7 @@
   "ligne_charges": {
     "label": "Provision sur charges",
     "quantity": 1,
-    "unit": "mois",
+    "unit": "{unite}",
     "raw_currency_unit_price": "{charges_ht}",
     "vat_rate": "{vat_rate}"
   }

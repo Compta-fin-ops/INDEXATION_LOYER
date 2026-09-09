@@ -35,7 +35,7 @@ d'une commande.
 | Courriers locataires | ✔ | Un PDF par échéance à notifier (révision appliquée, gel, ou attente d'indice), texte paramétrable dans `config/courrier_modele.json`, marquage de la date d'envoi dans le classeur. |
 | Rafraîchissement | ✔ | Relit la feuille Baux (saisies du cabinet), régénère les feuilles calculées, conserve toutes les colonnes jaunes (Décision, Consigne, Appliqué, dates, Commentaire), crée un `.bak`. |
 | Contre-épreuve | ✔ | Un moteur Python indépendant recalcule tout ; un test recalcule le classeur avec LibreOffice et compare cellule à cellule (30 échéances de démo dont 2 gels, 0 écart). |
-| Pennylane | ◐ dry-run seulement | Corps JSON par bail. **Schéma à valider** contre la documentation (non consultable depuis ici) ; l'envoi est verrouillé tant que `schema_valide` est `false`. |
+| Pennylane | ✔ schéma aligné sur l'OpenAPI officielle (2026-05-27), envoi non encore testé en réel | Corps conforme à `POST /api/external/v2/billing_subscriptions` : `recurring_rule` (mensuel, trimestriel = monthly interval 3…), `customer_invoice_data.invoice_lines` (prix en chaîne), `mode`, conditions et moyen de paiement. Le JSON de la feuille Pennylane et celui du client Python sont comparés dans les tests. |
 
 ## Installation et premier usage
 
@@ -64,7 +64,7 @@ Sans accès direct à l'API depuis le poste : télécharger la série sur
 | Indices | Copie du cache : série, trimestre `AAAA-Tn`, valeur, statut A/P, variation annuelle | script |
 | Révisions | Une ligne par bail × échéance : trimestres de référence, indices, coefficient, **Décision**, loyer brut, plafond, loyer retenu, mensuel, par échéance, TVA, TTC, **statut**, **Consigne (à faire)** | script ; cabinet pour Décision, Consigne, Appliqué ?, dates, Commentaire |
 | Alertes | Par bail : loyer actuel, prochaine révision, trimestre attendu, indice publié ?, révisions calculables non facturées, révisions gelées, **action**, consigne de la prochaine révision | script |
-| Pennylane | Par bail : customer_id, libellé, prix unitaire HT à l'échéance, code TVA, JSON d'aperçu | script |
+| Pennylane | Par bail : customer_id, label, recurring_rule, prix unitaire HT à l'échéance (chaîne), vat_rate, mode / conditions / moyen de paiement (depuis Société), subscription_id existant, corps JSON complet | script |
 
 Statuts de la feuille Révisions :
 
@@ -117,20 +117,39 @@ seuil de 25 % de l'art. L145-39. Ces points sont signalés dans le classeur pour
 | IRL | 001515333 | 100 au T4 1998 | Habitation – **idbank à confirmer au premier appel** (le garde-fou sur le titre bloquera un mauvais identifiant) |
 
 Les trois premiers idbanks ont été recoupés avec les pages `insee.fr/fr/statistiques/serie/<idbank>`.
-L'INSEE ouvre par ailleurs un portail à clé (`portail-api.insee.fr`, « Api BDM ») ; si le service SDMX
-historique devait fermer, seul `insee.recuperer_series` est à adapter.
+Point d'accès alternatif : `fetch-indices --api-insee` interroge `https://api.insee.fr/series/BDM/V1/…` avec le
+jeton de la variable `INSEE_API_TOKEN`. Le nom exact de l'en-tête d'authentification attendu par l'INSEE
+(historiquement `Authorization: Bearer`, `X-INSEE-Api-Key-Integration` sur le nouveau portail) est à
+confirmer au premier appel ; il se règle dans `config/series_insee.json`.
 
-## Pennylane – ce qui reste à faire avant un envoi réel
+## Pennylane
 
-1. Ouvrir <https://pennylane.readme.io/reference/postbillingsubscriptions> et comparer chaque champ de
-   `config/pennylane_mapping.json` (`recurrence`, `invoice_lines`, `raw_currency_unit_price`, `vat_rate`,
-   `mode`, `start`). Les noms sont issus de la connaissance générale de l'API v2, pas de la page elle-même.
-2. Renseigner `Pennylane customer_id` (et `product_id` si les produits « Loyer » existent) dans la feuille Baux.
-3. Basculer `schema_valide` à `true`, exporter `PENNYLANE_API_TOKEN`, puis `pennylane <société> --push`.
+Corps envoyé (un abonnement par bail, au loyer actuel) :
 
-Cible suivante : à chaque révision passée en « Appliqué », clôturer l'abonnement courant et en créer un
-nouveau au loyer révisé (ou mettre à jour l'abonnement si l'API le permet), et rapprocher les factures
-émises avec le loyer théorique du classeur.
+| Champ | Source |
+|---|---|
+| `customer_id`, `product_id` | feuille Baux |
+| `start` | 1er jour du mois suivant |
+| `mode`, `payment_conditions`, `payment_method` | feuille Société (listes déroulantes ; défauts `awaiting_validation` = factures en brouillon, `upon_receipt`, `offline`) |
+| `recurring_rule` | périodicité de facturation : Mensuelle → monthly/1, Trimestrielle → monthly/3, Semestrielle → monthly/6, Annuelle → yearly/1 ; `day_of_month` 1 |
+| `customer_invoice_data.invoice_lines` | ligne loyer (`unit` mois/trimestre…, `raw_currency_unit_price` en chaîne à 2 décimales, `vat_rate` FR_200…) + ligne « Provision sur charges » si charges |
+| `customer_invoice_data.special_mention` | « Loyer indexé sur l'ILC – révision du … (indice 2025-T4 : …) » |
+
+Procédure :
+
+1. Renseigner `Pennylane customer_id` (et `product_id` si les produits « Loyer » existent) dans la feuille Baux ;
+   vérifier les trois réglages Pennylane de la feuille Société.
+2. `pennylane <société>` : écrit `out/*.json`, n'envoie rien. Relire un corps.
+3. `export PENNYLANE_API_TOKEN=…` (jeton OAuth avec le scope `billing_subscriptions:all`) puis
+   `pennylane <société> --push`. Chaque 201 inscrit l'identifiant renvoyé dans la colonne
+   `Pennylane subscription_id` de Baux ; un bail qui en a déjà un est ignoré (sauf `--remplacer`).
+
+Le mode `email` (envoi automatique des factures) exige des destinataires et un modèle d'e-mail
+Pennylane : non géré, le client le signale.
+
+Cible suivante : à chaque révision passée en « Appliqué », arrêter l'abonnement courant (endpoint à
+identifier dans la doc : `llms.txt`) et en créer un nouveau au loyer révisé, puis rapprocher les
+factures émises avec le loyer théorique du classeur.
 
 ## Structure du dépôt
 
@@ -140,7 +159,7 @@ config/             series_insee.json · pennylane_mapping.json · courrier_mode
 data/indices/       indices_insee.csv (cache, commité par le workflow hebdomadaire)
 suivi/              classeurs clients (ignorés par git : données nominatives)
 demo/               DEMO_SCI_EXEMPLE_valeurs_fictives.xlsx
-tests/              21 tests, dont la parité LibreOffice ↔ moteur Python et la génération des PDF
+tests/              22 tests, dont la parité LibreOffice ↔ moteur Python et la génération des PDF
 .github/workflows/  indices.yml : fetch-indices chaque lundi + commit du cache
 ```
 

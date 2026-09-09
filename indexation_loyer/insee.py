@@ -91,12 +91,14 @@ def url_sdmx(idbanks: Iterable[str], start_period: str | None = None,
     return url
 
 
-def telecharger(url: str, timeout: int = 60, accept: str = "application/xml") -> bytes:
+def telecharger(url: str, timeout: int = 60, accept: str = "application/xml",
+                en_tetes: dict[str, str] | None = None) -> bytes:
     req = urllib.request.Request(
         url,
         headers={
             "Accept": accept,
             "User-Agent": "indexation-loyer/0.1 (+cabinet expertise comptable; contact via dépôt)",
+            **(en_tetes or {}),
         },
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # respecte HTTPS_PROXY
@@ -156,15 +158,28 @@ def _nom_local(tag: str) -> str:
 
 
 def recuperer_series(codes: Iterable[str] | None = None, start_period: str | None = "2000-Q1",
-                     config: dict | None = None) -> list[Observation]:
-    """Interroge la BDM pour les séries demandées (toutes par défaut)."""
+                     config: dict | None = None, api_insee: bool = False) -> list[Observation]:
+    """Interroge la BDM pour les séries demandées (toutes par défaut).
+
+    ``api_insee=True`` bascule sur api.insee.fr/series/BDM avec le jeton de la variable
+    d'environnement configurée (voir config/series_insee.json, clé _api_insee)."""
+    import os
     config = config or charger_config()
     codes = list(codes) if codes else list(config["series"])
     idbanks = [config["series"][c]["idbank"] for c in codes]
-    url = url_sdmx(idbanks, start_period=start_period, base_url=config["api"]["sdmx_base_url"])
+    api = config["api"]
+    en_tetes = None
+    base = api["sdmx_base_url"]
+    if api_insee:
+        base = api["sdmx_base_url_api_insee"]
+        jeton = os.environ.get(api["api_insee_variable_token"], "")
+        if not jeton:
+            raise RuntimeError(f"--api-insee exige la variable {api['api_insee_variable_token']}")
+        en_tetes = {api["api_insee_en_tete"]: api["api_insee_prefixe"] + jeton}
+    url = url_sdmx(idbanks, start_period=start_period, base_url=base)
     log.info("Appel INSEE : %s", url)
     try:
-        contenu = telecharger(url)
+        contenu = telecharger(url, en_tetes=en_tetes)
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"INSEE a répondu {e.code} pour {url}") from e
     except urllib.error.URLError as e:
@@ -268,7 +283,7 @@ def fusionner(existant: Iterable[Observation], nouveau: Iterable[Observation]) -
 
 def mettre_a_jour_cache(codes: Iterable[str] | None = None, chemin: Path = CHEMIN_CACHE,
                         fichier_csv: Path | None = None, serie_forcee: str | None = None,
-                        start_period: str | None = "2000-Q1") -> tuple[list[Observation], list[Observation]]:
+                        start_period: str | None = "2000-Q1", api_insee: bool = False) -> tuple[list[Observation], list[Observation]]:
     """Point d'entrée de la commande ``fetch-indices``.
 
     Retourne (observations fusionnées, observations nouvelles ou modifiées).
@@ -277,7 +292,7 @@ def mettre_a_jour_cache(codes: Iterable[str] | None = None, chemin: Path = CHEMI
     if fichier_csv:
         nouveau = parser_csv_insee(Path(fichier_csv).read_bytes(), serie_forcee=serie_forcee)
     else:
-        nouveau = recuperer_series(codes, start_period=start_period)
+        nouveau = recuperer_series(codes, start_period=start_period, api_insee=api_insee)
     avant = {o.cle: o.valeur for o in existant}
     delta = [o for o in nouveau if avant.get(o.cle) != o.valeur]
     fusion = fusionner(existant, nouveau)
