@@ -103,6 +103,10 @@ def controler(sit: SituationBail, proposition: dict, dossier: dict, envois: list
     c.append(Controle("Abonnement borné à une période d'indexation", borne,
                       f"{count} occurrence(s), dernière le {_fr(_d(proposition.get('derniere_occurrence')))}" if count
                       else "Aucun nombre d'occurrences : un abonnement sans terme est refusé."))
+    c.append(Controle("Taux de TVA reconnu", proposition.get("tva_connue", True),
+                      "Code Pennylane " + str(lignes[0].get("vat_rate")) + "." if lignes and proposition.get("tva_connue", True) else
+                      f"Le taux de {bail.get('tva_pct')} % du bail n'a pas de code Pennylane connu de la console : "
+                      "corriger le taux du bail. Aucune facture n'est créée « exonérée » par défaut."))
     c.append(Controle("Loyer de la période connu", bool(proposition.get("loyer_connu")),
                       ("Loyer révisé de " + _eur(proposition["loyer_annuel"]) + " par an, calculé sur l'indice publié."
                        if proposition.get("periode_revisee") else "Loyer en vigueur, aucune révision avant le terme proposé.")

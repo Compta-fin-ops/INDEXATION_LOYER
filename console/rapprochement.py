@@ -20,6 +20,9 @@ TOLERANCE_ANNUELLE = 1.0          # euro : absorbe les arrondis d'échéance
 DELAI_RENOUVELLEMENT = 45         # jours avant le terme d'un abonnement
 DELAI_BROUILLON = 7               # jours au-delà desquels une facture en brouillon est signalée
 # la liste des factures clients de Pennylane contient aussi ces documents, qui ne sont pas des factures dues
+# taux de TVA admis sur un bail et code Pennylane correspondant (énumération vat_rate de l'API) ;
+# 8,5 % : taux normal des départements d'outre-mer
+CODES_TVA = {20.0: "FR_200", 10.0: "FR_100", 8.5: "FR_85", 5.5: "FR_55", 2.1: "FR_21", 0.0: "exempt"}
 STATUTS_HORS_FACTURE = ("cancelled", "credit_note", "proforma", "shipping_order", "purchasing_order",
                         "estimate_pending", "estimate_accepted", "estimate_invoiced", "estimate_denied")
 
@@ -303,7 +306,8 @@ def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, regl
         while d < prochaine:
             count, d = count + 1, ajouter_mois(d, pas)
     n = ECHEANCES_PAR_AN.get(periodicite, 12)
-    tva = {20: "FR_200", 10: "FR_100", 5.5: "FR_55", 2.1: "FR_21"}.get(bail.get("tva_pct"), "exempt")
+    taux = bail.get("tva_pct")
+    tva = CODES_TVA.get(float(taux) if taux is not None else 20.0)     # None : taux inconnu, jamais « exonéré » par défaut
     unite = UNITE.get(periodicite, "mois")
     regle: dict = ({"type": "yearly", "interval": 1} if periodicite == "Annuelle"
                    else {"type": "monthly", "interval": pas, "day_of_month": debut.day})
@@ -332,7 +336,7 @@ def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, regl
     dernier = ajouter_mois(debut, pas * (count - 1)) if count else None
     return {"corps": corps, "debut": debut.isoformat(), "occurrences": count,
             "derniere_occurrence": dernier.isoformat() if dernier else None,
-            "envoyable": bail.get("customer_id") is not None,
+            "envoyable": bail.get("customer_id") is not None and tva is not None, "tva_connue": tva is not None,
             "loyer_connu": loyer_connu, "periode_revisee": periode_revisee, "loyer_annuel": loyer,
             "note": ("Loyer révisé inconnu : l'indice de la révision du " + _fr(revise_le) + " n'est pas publié. "
                      "Le montant ci-dessous est l'ancien loyer") if not loyer_connu else

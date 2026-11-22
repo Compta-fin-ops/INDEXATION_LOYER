@@ -20,6 +20,8 @@ from indexation_loyer import calcul, insee
 from indexation_loyer.baux import DECISIONS, INDICES, METHODES, PERIODICITES_FACTURATION, TYPES_BAIL, Bail
 from indexation_loyer.periodes import Trimestre
 
+from .rapprochement import CODES_TVA
+
 NATURES_PIECE = ("Bail", "Avenant", "Courrier", "État des lieux", "Autre")
 # paramètres saisis d'un bail (hors identifiants techniques et champs calculés)
 CHAMPS_BAIL = ("code", "local", "locataire", "adresse_locataire", "type_bail", "date_effet", "duree_ans", "date_fin",
@@ -184,8 +186,8 @@ def valider(champs: dict[str, str]) -> tuple[dict, list[str]]:
     v["charges_annuelles"] = _nombre(t("charges_annuelles"), "charges_annuelles", e) or 0.0
     tva = _nombre(t("tva_pct"), "tva_pct", e)
     v["tva_pct"] = 20.0 if tva is None else tva
-    if v["tva_pct"] not in (0, 2.1, 5.5, 10, 20):
-        e.append("TVA : taux attendu parmi 0, 2,1, 5,5, 10 et 20 %.")
+    if v["tva_pct"] not in CODES_TVA:
+        e.append("TVA : taux attendu parmi " + ", ".join(f"{x:g}".replace(".", ",") for x in sorted(CODES_TVA)) + " %.")
     v["periodicite_revision_ans"] = _nombre(t("periodicite_revision_ans"), "periodicite_revision_ans", e, entier=True) or 1
     if v["periodicite_revision_ans"] not in (1, 2, 3):
         e.append("Révision : périodicité de 1, 2 ou 3 ans.")

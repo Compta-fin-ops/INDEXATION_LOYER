@@ -23,7 +23,7 @@
     "Annuelle":      {"type": "yearly",  "interval": 1}
   },
   "unite_par_periodicite": {"Mensuelle": "mois", "Trimestrielle": "trimestre", "Semestrielle": "semestre", "Annuelle": "an"},
-  "vat_rate_par_taux": {"20": "FR_200", "10": "FR_100", "5.5": "FR_55", "2.1": "FR_21", "0": "exempt"},
+  "vat_rate_par_taux": {"20": "FR_200", "10": "FR_100", "8.5": "FR_85", "5.5": "FR_55", "2.1": "FR_21", "0": "exempt"},
   "corps": {
     "customer_id": "{customer_id}",
     "label": "{label}",

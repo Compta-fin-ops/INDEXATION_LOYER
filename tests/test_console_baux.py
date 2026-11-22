@@ -221,3 +221,23 @@ def test_abonnement_propose_cale_sur_les_termes_du_bail():
     assert p["corps"]["recurring_rule"] == {"type": "monthly", "interval": 3, "day_of_month": 1, "count": 2}
     mensuel = rp.proposer_abonnement({**bail, "periodicite": "Mensuelle"}, None, AUJ)
     assert (mensuel["debut"], mensuel["occurrences"]) == ("2026-12-01", 7)
+
+
+def test_tva_des_departements_d_outre_mer_et_taux_inconnu(console, indices):
+    """8,5 % se saisit et part sous le code FR_85 ; un taux sans code connu n'est jamais envoyé « exonéré »."""
+    from console import ecriture
+    c, cx, bail_id, _ = console
+    assert 'value="8.5"' in c.get(f"/baux/{bail_id}/modifier").text
+    assert c.post(f"/baux/{bail_id}", data={**BAIL, "tva_pct": "8,5"}, follow_redirects=False).status_code == 303
+    b = _bail(cx, bail_id, indices)
+    assert b["tva_pct"] == 8.5
+    p = rp.proposer_abonnement(b, None, AUJ)
+    assert {l["vat_rate"] for l in p["corps"]["customer_invoice_data"]["invoice_lines"]} == {"FR_85"} and p["envoyable"]
+    assert rp.proposer_abonnement({**b, "tva_pct": 0}, None, AUJ)["corps"]["customer_invoice_data"]["invoice_lines"][0]["vat_rate"] == "exempt"
+    assert c.post(f"/baux/{bail_id}", data={**BAIL, "tva_pct": "7"}).status_code == 400          # taux hors liste : saisie refusée
+    inconnu = rp.proposer_abonnement({**b, "tva_pct": 7.0}, None, AUJ)                            # bail repris d'ailleurs
+    assert not inconnu["envoyable"] and inconnu["corps"]["customer_invoice_data"]["invoice_lines"][0]["vat_rate"] is None
+    sit = rp.analyser_bail({**b, "tva_pct": 7.0}, [], [], AUJ)
+    controles = ecriture.controler(sit, inconnu, {"code": "HALLES", "variable_jeton": ""}, [], AUJ, simulation=True)
+    assert not ecriture.envoi_possible(controles)
+    assert any(x.libelle == "Taux de TVA reconnu" and not x.ok for x in controles)

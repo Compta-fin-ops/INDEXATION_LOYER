@@ -29,7 +29,7 @@
   <div class="formulaire">
     <label>Loyer initial annuel HT<input name="loyer_initial_annuel" value="{{ nb(b.loyer_initial_annuel) }}" required inputmode="decimal"><span class="aide">À la prise d'effet, hors charges.</span></label>
     <label>Provision sur charges annuelle HT<input name="charges_annuelles" value="{{ nb(b.charges_annuelles) }}" inputmode="decimal"></label>
-    <label>TVA, en %<select name="tva_pct">{% for v in ('20', '10', '5.5', '2.1', '0') %}<option value="{{ v }}"{{ ' selected' if (b.tva_pct if b.tva_pct is defined and b.tva_pct is not none and b.tva_pct != '' else 20) | float == v | float }}>{{ v | replace('.', ',') }}</option>{% endfor %}</select></label>
+    <label>TVA, en %<select name="tva_pct">{% for v in ('20', '10', '8.5', '5.5', '2.1', '0') %}<option value="{{ v }}"{{ ' selected' if (b.tva_pct if b.tva_pct is defined and b.tva_pct is not none and b.tva_pct != '' else 20) | float == v | float }}>{{ v | replace('.', ',') }}</option>{% endfor %}</select></label>
     <label>Facturation<select name="periodicite">{{ options('periodicite', choix.periodicite) }}</select></label>
   </div>
 </div>
