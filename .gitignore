@@ -9,3 +9,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 out/courriers/
+
+# base locale de la console : données de dossiers
+data/console.sqlite*

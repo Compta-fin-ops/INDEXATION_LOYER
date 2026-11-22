@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% import "_ecart.html" as E with context %}
+{% block titre %}Écarts · Console des loyers{% endblock %}
+{% block contenu %}
+<h1>Écarts</h1>
+<p class="sous-titre">{{ ecarts | length }} écart(s) affiché(s) sur {{ total }}.</p>
+<div class="carte">
+  <form class="filtres" method="get">
+    <label>Gravité<select name="gravite" onchange="this.form.submit()"><option value="">Toutes</option>{% for g, lib in GRAVITE.items() %}<option value="{{ g }}" {{ 'selected' if f.gravite == g }}>{{ lib }}</option>{% endfor %}</select></label>
+    <label>Nature<select name="type" onchange="this.form.submit()"><option value="">Toutes</option>{% for t in types_presents %}<option value="{{ t }}" {{ 'selected' if f.type == t }}>{{ TYPES.get(t, t) }}</option>{% endfor %}</select></label>
+    <label>Dossier<select name="dossier" onchange="this.form.submit()"><option value="">Tous</option>{% for c, n in noms.items() %}<option value="{{ c }}" {{ 'selected' if f.dossier == c }}>{{ n }}</option>{% endfor %}</select></label>
+    <noscript><button type="submit">Filtrer</button></noscript>
+    {% if f.gravite or f.type or f.dossier %}<a class="petit" href="/ecarts">Effacer les filtres</a>{% endif %}
+  </form>
+  {{ E.lignes(ecarts, noms) }}
+</div>
+{% endblock %}

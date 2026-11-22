@@ -47,6 +47,12 @@ modifier la structure des fiches (lignes 3 à 24 et tableau), le récapitulatif 
 | Courriers | ✔ | Un PDF par échéance à notifier (révision, gel, attente d'indice), texte dans `config/courrier_modele.json`, `--marquer` inscrit la date d'envoi dans la fiche. |
 | Pennylane | ✔ schéma officiel, envoi à tester | Corps conforme à l'OpenAPI du 2026-05-27, réglages dans Société, identifiant d'abonnement mémorisé dans la fiche après création. |
 
+## Console de pilotage des loyers facturés
+
+Application web qui compare, sur tous les dossiers, le loyer attendu des classeurs d'indexation et la
+facturation Pennylane, et fait remonter les écarts. Démonstration sur un portefeuille fictif :
+`python -m console demo` puis `python -m console serve`. Documentation : [docs/console.md](docs/console.md).
+
 ## Installation et premier usage
 
 ```bash

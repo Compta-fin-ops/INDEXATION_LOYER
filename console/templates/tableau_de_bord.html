@@ -1,0 +1,63 @@
+{% extends "base.html" %}{% import "_ecart.html" as E with context %}
+{% block contenu %}
+<h1>Loyers facturés, tous dossiers</h1>
+<p class="sous-titre">{{ s.nb_dossiers }} dossiers, {{ s.nb_baux }} baux. Loyer attendu selon les classeurs d'indexation, comparé aux abonnements Pennylane en cours.</p>
+
+<div class="tuiles">
+  <div class="tuile"><div class="libelle">Loyers attendus</div><div class="valeur">{{ s.attendu | eur }}</div><div class="note">par an, hors taxes, charges comprises</div></div>
+  <div class="tuile"><div class="libelle">Loyers facturés</div><div class="valeur">{{ s.facture | eur }}</div><div class="note">abonnements en cours, annualisés</div></div>
+  <div class="tuile {{ 'alerte' if s.ecart > 1 else 'bon' }}"><div class="libelle">Non facturé</div><div class="valeur">{{ s.ecart | eur }}</div><div class="note">{{ (s.ecart / s.attendu) | pct if s.attendu else '—' }} du loyer attendu</div></div>
+  <div class="tuile {{ 'alerte' if s.compte.bloquant else 'bon' }}"><div class="libelle">Écarts bloquants</div><div class="valeur">{{ s.compte.bloquant }}</div><div class="note">{{ s.compte.a_traiter }} autres à traiter</div></div>
+  <div class="tuile {{ 'attention' if s.impayes else 'bon' }}"><div class="libelle">Impayés</div><div class="valeur">{{ s.impayes | eur }}</div><div class="note">{{ s.nb_impayes }} facture(s) échue(s), TTC</div></div>
+  <div class="tuile"><div class="libelle">Révisions sous 60 jours</div><div class="valeur">{{ s.revisions_60j }}</div><div class="note"><a href="/echeancier">voir l'échéancier</a></div></div>
+</div>
+
+<div class="grille">
+  <div>
+    <div class="carte">
+      <h2>Par dossier</h2>
+      <div class="defile"><table>
+        <thead><tr><th>Dossier</th><th class="num">Baux</th><th class="num">Attendu / an</th><th class="num">Facturé / an</th><th class="num">Non facturé</th><th>Écarts</th><th>Baux conformes</th></tr></thead>
+        <tbody>
+        {% for a in analyses %}
+        <tr>
+          <td><a class="fort" href="/dossiers/{{ a.dossier.code }}">{{ a.dossier.nom }}</a></td>
+          <td class="num">{{ a.nb_baux }}</td>
+          <td class="num">{{ a.attendu_annuel | eur }}</td>
+          <td class="num">{{ a.facture_annuel | eur }}</td>
+          <td class="num {{ 'negatif' if a.ecart_annuel > 1 }}">{{ a.ecart_annuel | eur }}</td>
+          <td style="white-space: nowrap">{% if a.compte.bloquant %}<span class="pastille bloquant">{{ a.compte.bloquant }}</span> {% endif %}{% if a.compte.a_traiter %}<span class="pastille a_traiter">{{ a.compte.a_traiter }}</span>{% endif %}{% if not a.compte.bloquant and not a.compte.a_traiter %}<span class="pastille ok">Conforme</span>{% endif %}</td>
+          <td><span class="petit discret">{{ a.nb_ok }} sur {{ a.nb_baux }}</span><div class="jauge"><span style="width: {{ (100 * a.nb_ok / a.nb_baux) | round | int if a.nb_baux else 0 }}%"></span></div></td>
+        </tr>
+        {% endfor %}
+        <tr class="total"><td>Total</td><td class="num">{{ s.nb_baux }}</td><td class="num">{{ s.attendu | eur }}</td><td class="num">{{ s.facture | eur }}</td><td class="num">{{ s.ecart | eur }}</td><td></td><td class="petit">{{ s.nb_ok }} sur {{ s.nb_baux }}</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="carte">
+      <h2>À traiter en priorité</h2>
+      {{ E.lignes(priorites, noms) }}
+      <p class="petit" style="margin: 12px 0 0"><a href="/ecarts">Tous les écarts</a></p>
+    </div>
+  </div>
+  <div>
+    <div class="carte">
+      <h2>Prochaines échéances</h2>
+      <ul class="liste">
+      {% for l in prochaines %}
+        <li>
+          <span><a class="fort" href="/baux/{{ l.bail.id }}">{{ l.bail.locataire }}</a> <span class="discret">· {{ noms[l.dossier] }}</span></span>
+          <span class="fort">{{ l.date | date_fr }}</span>
+          <span class="discret petit">{{ l.nature }} · {{ l.detail }}</span>
+          <span class="petit discret" style="text-align: right">dans {{ l.jours }} j</span>
+        </li>
+      {% else %}<li class="discret">Aucune échéance sous 60 jours.</li>{% endfor %}
+      </ul>
+    </div>
+    <div class="carte">
+      <h2>Lecture du tableau</h2>
+      <p class="petit discret" style="margin: 0">Chaque abonnement couvre une période d'indexation et s'arrête à la date anniversaire. Un bail est conforme quand son abonnement en cours facture le loyer attendu et qu'il est borné à la prochaine révision. « Non facturé » additionne les loyers attendus sans abonnement en cours et les révisions non répercutées.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

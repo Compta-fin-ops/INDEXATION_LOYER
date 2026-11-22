@@ -1,0 +1,66 @@
+{% extends "base.html" %}{% import "_ecart.html" as E with context %}
+{% block titre %}{{ sit.bail.code }} {{ sit.bail.locataire }} · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="fil"><a href="/">Tableau de bord</a> / <a href="/dossiers/{{ a.dossier.code }}">{{ a.dossier.nom }}</a> / {{ sit.bail.code }}</div>
+<h1>{{ sit.bail.locataire }} {{ E.pastille(sit.gravite) }}</h1>
+<p class="sous-titre">Bail {{ sit.bail.code }} · {{ sit.bail.local }}</p>
+<div class="deux">
+  <div class="carte">
+    <h2>Loyer attendu, selon le classeur d'indexation</h2>
+    <dl class="fiche">
+      <dt>Prise d'effet</dt><dd>{{ sit.bail.date_effet | date_fr }}</dd>
+      <dt>Loyer initial annuel</dt><dd>{{ sit.bail.loyer_initial_annuel | eur2 }}</dd>
+      <dt>Loyer en vigueur annuel</dt><dd>{{ sit.bail.loyer_attendu_annuel | eur2 }}</dd>
+      <dt>Charges annuelles</dt><dd>{{ sit.bail.charges_annuelles | eur2 }}</dd>
+      <dt>Par échéance, {{ sit.bail.periodicite | lower }}</dt><dd>{{ (sit.attendu_annuel / n) | eur2 }} HT</dd>
+      <dt>Indice</dt><dd>{{ sit.bail.indice }}</dd>
+      <dt>Dernière révision</dt><dd>{{ sit.bail.date_derniere_revision | date_fr }} · {{ sit.bail.statut_revision }}</dd>
+      <dt>Prochaine révision</dt><dd>{{ sit.bail.date_prochaine_revision | date_fr }}</dd>
+      <dt>Terme du bail</dt><dd>{{ sit.bail.date_fin | date_fr }}</dd>
+    </dl>
+  </div>
+  <div class="carte">
+    <h2>Facturation Pennylane</h2>
+    {% if sit.courant %}
+    <dl class="fiche">
+      <dt>Abonnement en cours</dt><dd>n° {{ sit.courant.id }} · {{ STATUTS.get(sit.courant.statut, sit.courant.statut) }}</dd>
+      <dt>Montant par occurrence</dt><dd>{{ sit.courant.montant_ht | eur2 }} HT</dd>
+      <dt>Annualisé</dt><dd>{{ sit.facture_annuel | eur2 }}</dd>
+      <dt>Écart annuel</dt><dd class="{{ 'negatif' if (sit.attendu_annuel - sit.facture_annuel) | abs > 1 }}">{{ (sit.attendu_annuel - sit.facture_annuel) | eur2 }}</dd>
+      <dt>Période</dt><dd>du {{ sit.courant.debut | date_fr }}{{ ' au ' ~ (sit.courant.fin | date_fr) if sit.courant.fin else ', sans terme' }}</dd>
+      <dt>Prochaine occurrence</dt><dd>{{ sit.courant.prochaine_occurrence | date_fr }}</dd>
+      <dt>Factures générées</dt><dd>{{ MODES.get(sit.courant.mode, sit.courant.mode) }}</dd>
+      <dt>Client Pennylane</dt><dd>{{ sit.bail.customer_id or '—' }}</dd>
+    </dl>
+    {% else %}<p class="negatif" style="margin-top: 0">Aucun abonnement en cours.</p>
+    {% if sit.dernier_termine %}<p class="discret petit">Dernier abonnement : n° {{ sit.dernier_termine.id }}, terminé le {{ sit.dernier_termine.fin | date_fr }}, {{ sit.dernier_termine.montant_ht | eur2 }} par occurrence.</p>{% endif %}{% endif %}
+    {% if sit.suivant %}<p class="petit" style="margin-bottom: 0"><span class="pastille ok">Période suivante créée</span> n° {{ sit.suivant.id }}, à partir du {{ sit.suivant.debut | date_fr }}, {{ sit.suivant.montant_ht | eur2 }} par occurrence.</p>{% endif %}
+  </div>
+</div>
+<div class="carte"><h2>Écarts</h2>{{ E.lignes(sit.ecarts, avec_dossier=False) }}</div>
+{% if sit.proposition %}
+<div class="carte">
+  <h2>Abonnement proposé pour la période suivante</h2>
+  <p class="petit" style="margin: 0">À partir du <span class="fort">{{ sit.proposition.debut | date_fr }}</span>{% if sit.proposition.occurrences %}, <span class="fort">{{ sit.proposition.occurrences }} occurrence(s)</span>, la dernière le {{ sit.proposition.derniere_occurrence | date_fr }}{% endif %}. {{ sit.proposition.note }}.
+  {% if not sit.proposition.envoyable %}<span class="negatif">Client Pennylane manquant : non envoyable.</span>{% endif %}</p>
+  {% if sit.rappel and sit.rappel.echeances %}<p class="petit" style="margin: 8px 0 0"><span class="pastille a_traiter">Rappel de loyer</span> {{ sit.rappel.montant | eur2 }} HT à facturer séparément : {{ sit.rappel.echeances }} échéance(s) facturée(s) à l'ancien loyer depuis le {{ sit.rappel.depuis | date_fr }}, soit {{ sit.rappel.ecart_par_echeance | eur2 }} par échéance.</p>{% endif %}
+  <pre>POST /api/external/v2/billing_subscriptions
+{{ corps }}</pre>
+  <p class="discret petit" style="margin: 10px 0 0">Aperçu seulement. La console n'envoie rien : les factures naîtraient en brouillon, à valider dans Pennylane.</p>
+</div>
+{% endif %}
+<div class="carte">
+  <h2>Dernières factures</h2>
+  <div class="defile"><table>
+    <thead><tr><th>Date</th><th>Numéro</th><th>Échéance</th><th class="num">HT</th><th class="num">TTC</th><th class="num">Reste dû</th><th>Statut</th></tr></thead>
+    <tbody>
+    {% for f in sit.factures[:12] %}
+    <tr><td>{{ f.date | date_fr }}</td><td>{{ f.numero or '—' }}</td><td>{{ f.echeance | date_fr }}</td>
+      <td class="num">{{ f.montant_ht | eur2 }}</td><td class="num">{{ f.montant_ttc | eur2 }}</td>
+      <td class="num {{ 'negatif' if f.restant_du > 0 and f.statut == 'late' }}">{{ f.restant_du | eur2 }}</td>
+      <td><span class="pastille {{ {'paid': 'ok', 'late': 'bloquant', 'draft': 'a_traiter'}.get(f.statut, 'neutre') }}">{{ {'paid': 'Payée', 'late': 'En retard', 'draft': 'Brouillon', 'upcoming': 'À échoir', 'cancelled': 'Annulée'}.get(f.statut, f.statut) }}</span></td></tr>
+    {% else %}<tr><td colspan="7" class="discret">Aucune facture.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}
