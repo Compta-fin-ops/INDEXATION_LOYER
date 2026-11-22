@@ -3,22 +3,27 @@
 {% block contenu %}
 <div class="fil"><a href="/">Tableau de bord</a> / <a href="/dossiers/{{ a.dossier.code }}">{{ a.dossier.nom }}</a> / {{ sit.bail.code }}</div>
 <h1>{{ sit.bail.locataire }} {{ E.pastille(sit.gravite) }}</h1>
-<p class="sous-titre">Bail {{ sit.bail.code }} · {{ sit.bail.local }}</p>
+<p class="sous-titre">Bail {{ sit.bail.code }} · {{ sit.bail.local }} · <a href="/baux/{{ sit.bail.id }}/modifier">Modifier le bail</a></p>
+{% if erreur %}<div class="bandeau erreur">{{ erreur }}</div>{% endif %}
+{% if message %}<div class="bandeau succes">{{ message }}</div>{% endif %}
+{% if alerte_indice %}<div class="bandeau erreur">{{ alerte_indice }}</div>{% endif %}
 <div class="deux">
   <div class="carte">
-    <h2>Loyer attendu, selon le classeur d'indexation</h2>
+    <h2>Loyer attendu{{ ', calculé par la console' if sit.bail.calcule else ', valeurs importées' }}</h2>
     <dl class="fiche">
       <dt>Prise d'effet</dt><dd>{{ sit.bail.date_effet | date_fr }}</dd>
       <dt>Loyer initial annuel</dt><dd>{{ sit.bail.loyer_initial_annuel | eur2 }}</dd>
       <dt>Loyer en vigueur annuel</dt><dd>{{ sit.bail.loyer_attendu_annuel | eur2 }}</dd>
       <dt>Charges annuelles</dt><dd>{{ sit.bail.charges_annuelles | eur2 }}</dd>
       <dt>Par échéance, {{ sit.bail.periodicite | lower }}</dt><dd>{{ (sit.attendu_annuel / n) | eur2 }} HT</dd>
-      <dt>Indice</dt><dd>{{ sit.bail.indice }}</dd>
+      <dt>Indice</dt><dd>{{ sit.bail.indice }}{% if sit.bail.calcule %}, départ {{ sit.bail.trimestre_base }}, {{ sit.bail.methode | lower }}, {{ 'révision annuelle' if sit.bail.periodicite_revision_ans == 1 else 'révision tous les ' ~ sit.bail.periodicite_revision_ans ~ ' ans' }}{% if sit.bail.plafond_annuel_pct is not none %}, plafond {{ ('%g' | format(sit.bail.plafond_annuel_pct)) | replace('.', ',') }} % par an{% endif %}{% endif %}</dd>
       <dt>Dernière révision</dt><dd>{{ sit.bail.date_derniere_revision | date_fr }} · {{ sit.bail.statut_revision }}</dd>
       <dt>Prochaine révision</dt><dd>{{ sit.bail.date_prochaine_revision | date_fr }}</dd>
       <dt>Loyer après cette révision</dt><dd>{% if sit.bail.loyer_prochain_annuel is not none %}{{ sit.bail.loyer_prochain_annuel | eur2 }} par an{% else %}<span class="discret">inconnu, indice non publié</span>{% endif %}</dd>
-      <dt>Terme du bail</dt><dd>{{ sit.bail.date_fin | date_fr }}</dd>
+      <dt>Terme du bail</dt><dd>{{ sit.bail.date_fin | date_fr }}{% if sit.bail.date_sortie %} · sortie le {{ sit.bail.date_sortie | date_fr }}{% endif %}</dd>
     </dl>
+    {% if not sit.bail.calcule %}<p class="discret petit" style="margin: 12px 0 0">Ces montants ont été importés et ne sont pas recalculés. <a href="/baux/{{ sit.bail.id }}/modifier">Compléter les paramètres du bail</a> pour que la console calcule les révisions.</p>{% endif %}
+    {% if sit.bail.notes %}<p class="petit" style="margin: 12px 0 0"><span class="fort">Notes.</span> {{ sit.bail.notes }}</p>{% endif %}
   </div>
   <div class="carte">
     <h2>Facturation Pennylane</h2>
@@ -39,6 +44,59 @@
   </div>
 </div>
 <div class="carte"><h2>Écarts</h2>{{ E.lignes(sit.ecarts, avec_dossier=False) }}</div>
+{% if sit.bail.calcule %}
+<div class="carte">
+  <h2>Révisions</h2>
+  <div class="defile"><table class="revisions">
+    <thead><tr><th>N°</th><th>Date</th><th>Indice</th><th class="num">Coefficient</th><th class="num">Loyer avant</th><th class="num">Loyer retenu</th><th>État</th><th>Décision, commentaire, courrier envoyé le</th><th>Courrier</th></tr></thead>
+    <tbody>
+    {% for l in lignes %}{% set d = dec.get(l.echeance.numero, {}) %}
+    <tr class="{{ 'a-venir' if l.echeance.date_revision > aujourdhui }}">
+      <td>{{ l.echeance.numero }}</td>
+      <td>{{ l.echeance.date_revision | date_fr }}</td>
+      <td class="indice">{{ l.echeance.trimestre_reference }} : {{ ('%g' | format(l.indice_reference)) | replace('.', ',') if l.indice_reference is not none else 'non publié' }}
+        <div class="discret petit">contre {{ l.trimestre_precedent_effectif }} : {{ ('%g' | format(l.indice_precedent)) | replace('.', ',') if l.indice_precedent is not none else '—' }}</div></td>
+      <td class="num">{{ ('%.5f' | format(l.coefficient)) | replace('.', ',') if l.coefficient is not none else '—' }}</td>
+      <td class="num">{{ l.loyer_precedent | eur2 }}</td>
+      <td class="num fort">{{ l.loyer_retenu | eur2 }}{% if l.variation_pct is not none and not l.statut.startswith('❄') %}<div class="discret petit">{{ '%+.2f' | format(l.variation_pct * 100) | replace('.', ',') }} %</div>{% endif %}
+        {% if l.loyer_brut is not none and l.loyer_retenu is not none and l.loyer_retenu < l.loyer_brut and not l.statut.startswith('❄') %}<div class="discret petit">plafonné, calcul brut {{ l.loyer_brut | eur2 }}</div>{% endif %}</td>
+      <td><span class="pastille {{ 'info' if l.statut.startswith('❄') else 'bloquant' if l.statut.startswith('⚠') else 'ok' if l.loyer_retenu is not none else 'neutre' }}">{{ l.statut | replace('✔ ', '') | replace('⚠ ', '') | replace('❄ ', '') }}</span></td>
+      <td><form method="post" action="/baux/{{ sit.bail.id }}/revisions/{{ l.echeance.numero }}" class="decision">
+        <select name="decision" aria-label="Décision">{% for x in DECISIONS %}<option{{ ' selected' if l.decision == x }}>{{ x }}</option>{% endfor %}</select>
+        <input type="text" name="commentaire" value="{{ d.commentaire or '' }}" placeholder="Commentaire, consigne" aria-label="Commentaire">
+        <input type="date" name="courrier_le" value="{{ d.courrier_le or '' }}" aria-label="Courrier envoyé le" title="Courrier envoyé le">
+        <button type="submit" title="Enregistrer la décision">OK</button></form></td>
+      <td>{% if l.loyer_precedent is not none and l.statut != 'À venir' %}<a href="/baux/{{ sit.bail.id }}/revisions/{{ l.echeance.numero }}/courrier.pdf">PDF</a>{% else %}<span class="discret">—</span>{% endif %}</td>
+    </tr>
+    {% else %}<tr><td colspan="9" class="discret">Aucune révision avant {{ aujourdhui.year + 2 * sit.bail.periodicite_revision_ans }}.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  <p class="discret petit" style="margin: 10px 0 0">Geler sans rattrapage : la hausse de l'année est abandonnée. Geler avec rattrapage : la révision suivante repart de l'indice de la dernière révision appliquée. Le courrier reprend la décision en vigueur.</p>
+</div>
+{% endif %}
+<div class="deux">
+  <div class="carte">
+    <h2>Pièces jointes</h2>
+    <ul class="liste">
+    {% for p in pieces %}<li><span><a class="fort" href="/pieces/{{ p.id }}">{{ p.nom }}</a> <span class="pastille neutre">{{ p.nature }}</span></span><span class="discret petit">{{ (p.taille / 1024) | round | int }} Ko · {{ p.horodatage[:10] | date_fr }}</span></li>
+    {% else %}<li><span class="discret">Aucune pièce. Joindre le bail signé et ses avenants.</span></li>{% endfor %}
+    </ul>
+    <form method="post" action="/baux/{{ sit.bail.id }}/pieces" enctype="multipart/form-data" class="depot">
+      <select name="nature" aria-label="Nature de la pièce">{% for x in NATURES %}<option>{{ x }}</option>{% endfor %}</select>
+      <input type="file" name="fichier" accept=".pdf,.png,.jpg,.jpeg,.docx" required aria-label="Fichier">
+      <button type="submit">Joindre</button>
+    </form>
+    <p class="discret petit" style="margin: 8px 0 0">PDF, image ou Word, 25 Mo au plus. Les pièces restent sur le poste de la console, elles ne partent pas vers Pennylane.</p>
+  </div>
+  <div class="carte">
+    <h2>Historique</h2>
+    <ul class="liste">
+    {% for h in historique %}<li><span><span class="fort">{{ h.action }}</span>{% if h.detail %}<div class="discret petit">{{ h.detail }}</div>{% endif %}</span><span class="discret petit">{{ h.horodatage[:10] | date_fr }} · {{ h.auteur }}</span></li>
+    {% else %}<li><span class="discret">Aucune modification enregistrée.</span></li>{% endfor %}
+    </ul>
+  </div>
+</div>
+
 {% if sit.proposition %}
 <div class="carte">
   <h2>Abonnement proposé pour la période suivante</h2>

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% macro options(nom, liste) %}{% for v in liste %}<option value="{{ v }}"{{ ' selected' if (b[nom] | string) == (v | string) }}>{{ v }}</option>{% endfor %}{% endmacro %}
+{% macro nb(v) %}{% if v is string %}{{ v }}{% elif v is defined and v is not none %}{{ ('%.12g' | format(v | float)) | replace('.', ',') }}{% endif %}{% endmacro %}
+{% block titre %}{{ 'Modifier ' ~ b.code if bail_id else 'Nouveau bail' }} · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="fil"><a href="/">Tableau de bord</a> / <a href="/dossiers/{{ dossier.code }}">{{ dossier.nom }}</a> / {% if bail_id %}<a href="/baux/{{ bail_id }}">{{ b.code }}</a> / Modifier{% else %}Nouveau bail{% endif %}</div>
+<h1>{{ 'Modifier le bail ' ~ b.code if bail_id else 'Nouveau bail' }}</h1>
+<p class="sous-titre">{{ dossier.nom }}. La console calcule le loyer en vigueur et les révisions à partir de ces paramètres et des indices INSEE relevés.</p>
+{% for e in erreurs %}<div class="bandeau erreur">{{ e }}</div>{% endfor %}
+{% if avertissement %}<div class="bandeau">{{ avertissement }}</div>{% endif %}
+{% if bail_id and not b.calcule and not erreurs %}<div class="bandeau">Ce bail porte des valeurs importées. À l'enregistrement, la console calculera elle-même le loyer : vérifier le loyer initial, la date d'effet et l'indice de départ.</div>{% endif %}
+<form method="post" action="{{ '/baux/' ~ bail_id if bail_id else '/dossiers/' ~ dossier.code ~ '/baux' }}">
+<div class="carte">
+  <h2>Le bail</h2>
+  <div class="formulaire">
+    <label>Code du bail<input name="code" value="{{ b.code or '' }}" required maxlength="12"></label>
+    <label class="large">Locataire<input name="locataire" value="{{ b.locataire or '' }}" required></label>
+    <label class="large">Local<input name="local" value="{{ b.local or '' }}" required placeholder="Adresse et désignation du local"></label>
+    <label class="large">Adresse de correspondance<textarea name="adresse_locataire" rows="2" placeholder="Si elle diffère du local">{{ b.adresse_locataire or '' }}</textarea></label>
+    <label>Type de bail<select name="type_bail">{{ options('type_bail', choix.type_bail) }}</select></label>
+    <label>Prise d'effet<input type="date" name="date_effet" value="{{ (b.date_effet or '')[:10] }}" required></label>
+    <label>Durée, en années<input name="duree_ans" value="{{ b.duree_ans if b.duree_ans is not none else '' }}" inputmode="numeric"></label>
+    <label>Terme contractuel<input type="date" name="date_fin" value="{{ (b.date_fin or '')[:10] }}"><span class="aide">Vide : calculé sur la durée.</span></label>
+    <label>Sortie du locataire<input type="date" name="date_sortie" value="{{ (b.date_sortie or '')[:10] }}"><span class="aide">Arrête les révisions. Sans date de sortie, elles continuent après le terme.</span></label>
+  </div>
+</div>
+<div class="carte">
+  <h2>Le loyer et sa facturation</h2>
+  <div class="formulaire">
+    <label>Loyer initial annuel HT<input name="loyer_initial_annuel" value="{{ nb(b.loyer_initial_annuel) }}" required inputmode="decimal"><span class="aide">À la prise d'effet, hors charges.</span></label>
+    <label>Provision sur charges annuelle HT<input name="charges_annuelles" value="{{ nb(b.charges_annuelles) }}" inputmode="decimal"></label>
+    <label>TVA, en %<select name="tva_pct">{% for v in ('20', '10', '5.5', '2.1', '0') %}<option value="{{ v }}"{{ ' selected' if (b.tva_pct if b.tva_pct is defined and b.tva_pct is not none and b.tva_pct != '' else 20) | float == v | float }}>{{ v | replace('.', ',') }}</option>{% endfor %}</select></label>
+    <label>Facturation<select name="periodicite">{{ options('periodicite', choix.periodicite) }}</select></label>
+  </div>
+</div>
+<div class="carte">
+  <h2>La clause d'indexation</h2>
+  <div class="formulaire">
+    <label>Indice<select name="indice">{{ options('indice', choix.indice) }}</select></label>
+    <label>Trimestre de l'indice de départ<input name="trimestre_base" value="{{ b.trimestre_base or '' }}" placeholder="2023-T2"><span class="aide">Celui que cite le bail. Vide : deux trimestres avant la prise d'effet, à confirmer dans le bail.</span></label>
+    <label>Révision tous les<select name="periodicite_revision_ans">{% for v in (1, 2, 3) %}<option value="{{ v }}"{{ ' selected' if (b.periodicite_revision_ans or 1) | int == v }}>{{ v }} an{{ 's' if v > 1 }}</option>{% endfor %}</select></label>
+    <label>Méthode<select name="methode">{{ options('methode', choix.methode) }}</select><span class="aide">Chaînée : indice contre indice de la révision précédente. Base fixe : toujours contre l'indice de départ.</span></label>
+    <label>Plafond annuel, en %<input name="plafond_annuel_pct" value="{{ nb(b.plafond_annuel_pct) }}" inputmode="decimal"><span class="aide">Vide : aucun plafond.</span></label>
+  </div>
+</div>
+<div class="carte">
+  <h2>Pennylane et notes</h2>
+  <div class="formulaire">
+    <label>Identifiant du client Pennylane<input name="customer_id" value="{{ b.customer_id if b.customer_id is not none else '' }}" inputmode="numeric"><span class="aide">Sert à rattacher les abonnements et les factures du locataire.</span></label>
+    <label>Identifiant de l'abonnement<input name="subscription_id" value="{{ b.subscription_id if b.subscription_id is not none else '' }}" inputmode="numeric"><span class="aide">Seulement si un même client porte plusieurs baux.</span></label>
+    <label class="large">Notes<textarea name="notes" rows="3">{{ b.notes or '' }}</textarea></label>
+  </div>
+  <p class="actions"><button class="principal" type="submit">Enregistrer le bail</button> <a class="bouton" href="{{ '/baux/' ~ bail_id if bail_id else '/dossiers/' ~ dossier.code }}">Annuler</a></p>
+</div>
+</form>
+{% endblock %}

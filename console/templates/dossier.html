@@ -3,7 +3,8 @@
 {% block contenu %}
 <div class="fil"><a href="/">Tableau de bord</a> / {{ a.dossier.nom }}</div>
 <h1>{{ a.dossier.nom }}</h1>
-<p class="sous-titre">SIREN {{ a.dossier.siren or '—' }} · {{ a.nb_baux }} baux · référentiel : {{ a.dossier.source_referentiel or '—' }} · jeton lu dans <code>{{ a.dossier.variable_jeton or 'non déclaré' }}</code></p>
+<p class="sous-titre">SIREN {{ a.dossier.siren or '—' }} · {{ a.nb_baux }} baux · origine : {{ a.dossier.source_referentiel or '—' }} · jeton lu dans <code>{{ a.dossier.variable_jeton or 'non déclaré' }}</code></p>
+<p class="actions haut"><a class="bouton" href="/dossiers/{{ a.dossier.code }}/baux/nouveau">Nouveau bail</a><a class="bouton" href="/dossiers/{{ a.dossier.code }}/modifier">Modifier le dossier</a></p>
 <div class="tuiles">
   <div class="tuile"><div class="libelle">Loyers attendus</div><div class="valeur">{{ a.attendu_annuel | eur }}</div><div class="note">par an, hors taxes</div></div>
   <div class="tuile"><div class="libelle">Loyers facturés</div><div class="valeur">{{ a.facture_annuel | eur }}</div><div class="note">abonnements en cours</div></div>
@@ -26,6 +27,7 @@
       <td>{{ s.bail.date_prochaine_revision | date_fr }}<div class="discret petit">{{ s.bail.indice }}</div></td>
       <td>{{ E.pastille(s.gravite) }}{% if s.ecarts %}<div class="discret petit">{{ s.ecarts[0].titre }}</div>{% endif %}</td>
     </tr>
+    {% else %}<tr><td colspan="8" class="discret">Aucun bail. <a href="/dossiers/{{ a.dossier.code }}/baux/nouveau">Créer le premier bail</a>.</td></tr>
     {% endfor %}
     </tbody>
   </table></div>

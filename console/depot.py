@@ -1,4 +1,4 @@
-"""Lecture et écriture de la base : référentiel des baux, collecte Pennylane, chargements."""
+"""Lecture et écriture de la base : baux, collecte Pennylane, reprise d'un classeur, chargements."""
 from __future__ import annotations
 
 import logging
@@ -6,13 +6,17 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
+from . import referentiel
 from .pennylane_api import Client
 
 log = logging.getLogger(__name__)
 COLONNES_BAIL = ("code", "local", "locataire", "customer_id", "subscription_id", "indice", "periodicite", "tva_pct",
                  "date_effet", "date_fin", "loyer_initial_annuel", "loyer_attendu_annuel", "charges_annuelles",
                  "date_derniere_revision", "date_prochaine_revision", "loyer_prochain_annuel", "date_revision_suivante",
-                 "statut_revision", "revisions_non_appliquees")
+                 "statut_revision", "revisions_non_appliquees", "calcule", "type_bail", "adresse_locataire",
+                 "trimestre_base", "periodicite_revision_ans", "methode", "plafond_annuel_pct", "duree_ans", "notes")
+DEFAUTS_BAIL = {"calcule": 0, "type_bail": "Commercial", "adresse_locataire": "", "trimestre_base": "",
+                "periodicite_revision_ans": 1, "methode": "Chaînée", "notes": "", "revisions_non_appliquees": 0}
 
 
 def _iso(v):
@@ -27,10 +31,10 @@ def enregistrer_dossier(cx: sqlite3.Connection, code: str, nom: str, siren: str 
                   source_referentiel=excluded.source_referentiel""", (code, nom, siren, variable_jeton, source))
 
 
-def enregistrer_baux(cx: sqlite3.Connection, dossier: str, baux: list[dict], remplacer: bool = True) -> int:
-    """Insère ou met à jour les baux d'un dossier ; les baux absents de la liste sont retirés si `remplacer`."""
+def enregistrer_baux(cx: sqlite3.Connection, dossier: str, baux: list[dict], remplacer: bool = False) -> int:
+    """Insère ou met à jour les baux d'un dossier, par code. Rien n'est retiré, sauf `remplacer` explicite."""
     for b in baux:
-        valeurs = [_iso(b.get(c)) for c in COLONNES_BAIL]
+        valeurs = [_iso(b.get(c, DEFAUTS_BAIL.get(c))) for c in COLONNES_BAIL]
         cx.execute(f"""INSERT INTO baux (dossier, {', '.join(COLONNES_BAIL)}) VALUES (?, {', '.join('?' * len(COLONNES_BAIL))})
                        ON CONFLICT(dossier, code) DO UPDATE SET
                        {', '.join(f'{c}=excluded.{c}' for c in COLONNES_BAIL if c != 'code')}""", [dossier, *valeurs])
@@ -44,7 +48,8 @@ def enregistrer_baux(cx: sqlite3.Connection, dossier: str, baux: list[dict], rem
 
 def importer_classeur(cx: sqlite3.Connection, chemin: Path, code_dossier: str | None = None,
                       variable_jeton: str = "", aujourdhui: date | None = None) -> int:
-    """Alimente le référentiel depuis un classeur d'indexation : loyer en vigueur, dates de révision, statut."""
+    """Reprise d'un classeur d'indexation : les baux, leurs paramètres et les décisions de gel passent
+    dans la console, qui calcule ensuite seule. Opération de migration, à faire une fois par société."""
     from indexation_loyer import calcul
     from indexation_loyer.workbook import lire_classeur, lire_indices_classeur
     aujourdhui = aujourdhui or date.today()
@@ -52,6 +57,8 @@ def importer_classeur(cx: sqlite3.Connection, chemin: Path, code_dossier: str | 
     indices = calcul.table_indices(lire_indices_classeur(chemin))
     code = code_dossier or "".join(c for c in societe.nom.upper() if c.isalnum())[:12]
     enregistrer_dossier(cx, code, societe.nom, societe.siren, variable_jeton, source=Path(chemin).name)
+    cx.execute("UPDATE dossiers SET forme=?, adresse=?, signataire=?, qualite_signataire=?, ville_signature=? WHERE code=?",
+               (societe.forme, societe.adresse, societe.signataire, societe.qualite_signataire, societe.ville_signature, code))
     lignes_baux = []
     for b in baux:
         lignes = calcul.calculer(b, indices, horizon=b.date_fin or aujourdhui.replace(year=aujourdhui.year + 3),
@@ -76,8 +83,25 @@ def importer_classeur(cx: sqlite3.Connection, chemin: Path, code_dossier: str | 
             "revisions_non_appliquees": sum(
                 1 for l in echues if l.statut == calcul.STATUT_CALCULABLE
                 and str(saisies.applique.get((b.id, l.echeance.numero), "")).strip().lower() != "oui"),
+            "calcule": 1, "type_bail": b.type_bail, "adresse_locataire": b.adresse_locataire,
+            "trimestre_base": b.trimestre_base, "periodicite_revision_ans": b.periodicite_revision_ans,
+            "methode": b.methode, "plafond_annuel_pct": b.plafond_annuel_pct, "duree_ans": b.duree_ans, "notes": b.notes,
         })
-    return enregistrer_baux(cx, code, lignes_baux)
+    n = enregistrer_baux(cx, code, lignes_baux)
+    ids = {r["code"]: r["id"] for r in cx.execute("SELECT id, code FROM baux WHERE dossier=?", (code,))}
+    for (bail_code, numero), decision in saisies.decision.items():
+        if bail_code not in ids or not decision:
+            continue
+        notes = [str(x) for x in (saisies.consigne.get((bail_code, numero)), saisies.commentaire.get((bail_code, numero))) if x]
+        cx.execute("""INSERT INTO decisions (bail_id, numero, decision, commentaire, courrier_le, auteur, horodatage)
+                      VALUES (?,?,?,?,?,?,?) ON CONFLICT(bail_id, numero) DO UPDATE SET decision=excluded.decision,
+                      commentaire=excluded.commentaire, courrier_le=excluded.courrier_le""",
+                   (ids[bail_code], numero, str(decision).strip(), " · ".join(notes),
+                    _iso(saisies.courrier.get((bail_code, numero))) or None, "reprise du classeur",
+                    datetime.now().isoformat(timespec="seconds")))
+    referentiel.tracer(cx, "Reprise d'un classeur", f"{n} bail/baux repris de {Path(chemin).name}", code)
+    cx.commit()
+    return n
 
 
 def synchroniser(cx: sqlite3.Connection, client: Client, codes: list[str] | None = None, source: str = "") -> list[dict]:
@@ -115,13 +139,30 @@ def synchroniser(cx: sqlite3.Connection, client: Client, codes: list[str] | None
     return bilan
 
 
-def charger(cx: sqlite3.Connection, code: str | None = None) -> list[dict]:
-    """[{dossier, baux, abonnements, factures}] pour un dossier ou pour tous."""
+def charger(cx: sqlite3.Connection, code: str | None = None, aujourdhui: date | None = None,
+            chemin_indices: Path | None = None) -> list[dict]:
+    """[{dossier, baux, abonnements, factures}] pour un dossier ou pour tous.
+
+    Un bail géré par la console (calcule = 1) reçoit ici son loyer en vigueur et ses dates de révision,
+    recalculés à la date du jour à partir de ses paramètres, des indices relevés et des décisions de gel."""
+    from indexation_loyer import calcul
+    aujourdhui = aujourdhui or date.today()
+    indices = None
+    decisions: dict[int, dict[int, str]] = {}
+    for r in cx.execute("SELECT bail_id, numero, decision FROM decisions"):
+        decisions.setdefault(r["bail_id"], {})[r["numero"]] = r["decision"]
     filtre, args = ("WHERE code=?", (code,)) if code else ("", ())
     sortie = []
-    for d in cx.execute(f"SELECT * FROM dossiers {filtre} ORDER BY nom", args):
+    for d in cx.execute(f"SELECT * FROM dossiers {filtre} ORDER BY nom", args).fetchall():
         lire = lambda table, ordre: [dict(r) for r in cx.execute(
             f"SELECT * FROM {table} WHERE dossier=? ORDER BY {ordre}", (d["code"],))]
-        sortie.append({"dossier": dict(d), "baux": lire("baux", "code"),
+        baux = lire("baux", "code")
+        for b in baux:
+            if b.get("calcule") and b.get("date_effet"):
+                if indices is None:
+                    indices = calcul.table_indices(referentiel.lire_indices(chemin_indices))
+                b.update(referentiel.deriver(b, indices, decisions.get(b["id"], {}), aujourdhui))
+                b["revisions_non_appliquees"] = 0        # la console le constate sur l'abonnement, plus de case à cocher
+        sortie.append({"dossier": dict(d), "baux": baux,
                        "abonnements": lire("abonnements", "debut"), "factures": lire("factures", "date DESC")})
     return sortie

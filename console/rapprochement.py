@@ -1,4 +1,4 @@
-"""Rapprochement entre le loyer attendu (classeurs d'indexation) et la facturation Pennylane.
+"""Rapprochement entre le loyer attendu (baux de la console) et la facturation Pennylane.
 
 Fonctions pures sur des dictionnaires : aucune dépendance au web ni au réseau, donc testables.
 Chaque écart porte une gravité : « bloquant » (de l'argent n'est pas facturé ou l'est à tort),
@@ -19,6 +19,9 @@ LIBELLE_GRAVITE = {"bloquant": "Bloquant", "a_traiter": "À traiter", "info": "I
 TOLERANCE_ANNUELLE = 1.0          # euro : absorbe les arrondis d'échéance
 DELAI_RENOUVELLEMENT = 45         # jours avant le terme d'un abonnement
 DELAI_BROUILLON = 7               # jours au-delà desquels une facture en brouillon est signalée
+# la liste des factures clients de Pennylane contient aussi ces documents, qui ne sont pas des factures dues
+STATUTS_HORS_FACTURE = ("cancelled", "credit_note", "proforma", "shipping_order", "purchasing_order",
+                        "estimate_pending", "estimate_accepted", "estimate_invoiced", "estimate_denied")
 
 
 @dataclass
@@ -177,7 +180,11 @@ def analyser_bail(bail: dict, abonnements: list[dict], factures: list[dict], auj
               detail=f"Bail : {bail.get('periodicite', '').lower()} ; abonnement : {occurrences_par_an(c):g} échéance(s) par an.")
         if abs(ecart) > TOLERANCE_ANNUELLE:
             sens = "sous-facturation" if ecart > 0 else "sur-facturation"
-            if derniere and debut and derniere > debut or (bail.get("revisions_non_appliquees") or 0) > 0:
+            ancien = bail.get("loyer_precedent_annuel")     # l'abonnement facture-t-il encore le loyer d'avant révision ?
+            a_l_ancien_loyer = ancien is not None and abs(
+                ancien + (bail.get("charges_annuelles") or 0) - s.facture_annuel) <= TOLERANCE_ANNUELLE
+            if derniere and debut and derniere > debut or (bail.get("revisions_non_appliquees") or 0) > 0 or (
+                    derniere and a_l_ancien_loyer):
                 s.rappel = calculer_rappel(bail, c, derniere, aujourdhui)
                 e("REVISION_NON_REPERCUTEE", "bloquant",
                   f"Révision du {_fr(derniere)} non répercutée dans l'abonnement",
@@ -190,7 +197,7 @@ def analyser_bail(bail: dict, abonnements: list[dict], factures: list[dict], auj
                 e("MONTANT", "a_traiter", "Montant de l'abonnement différent du loyer attendu",
                   detail=f"Attendu {_eur(_attendu_echeance(bail))} par échéance, facturé {_eur(c['montant_ht'])} : "
                          f"{sens} de {_eur(abs(ecart))} par an.",
-                  action="Vérifier le bail au référentiel ou corriger l'abonnement", montant=ecart)
+                  action="Vérifier les paramètres du bail ou corriger l'abonnement", montant=ecart)
         deja = any(x.type == "REVISION_NON_REPERCUTEE" for x in s.ecarts)     # l'action couvre déjà le bornage
         if prochaine and (fin is None or fin >= prochaine) and not deja:
             e("NON_BORNE", "a_traiter", "Abonnement non borné à la date anniversaire",
@@ -204,10 +211,10 @@ def analyser_bail(bail: dict, abonnements: list[dict], factures: list[dict], auj
               f"Dernière occurrence le {_fr(fin)} : préparer la période du {_fr(ajouter_mois(fin, _pas_mois(c)))}",
               detail=("Loyer révisé connu : " + _eur(bail["loyer_prochain_annuel"]) + " par an."
                       if bail.get("loyer_prochain_annuel") is not None else
-                      "Loyer révisé non encore connu : indice à publier ou classeur à mettre à jour."),
+                      "Loyer révisé non encore connu : l'indice de la révision n'est pas publié."),
               action="Créer l'abonnement suivant au loyer révisé", montant=s.attendu_annuel)
         precedente = _d(c.get("occurrence_precedente"))
-        if precedente and not any((_d(f.get("date")) or date.min) >= precedente and f.get("statut") != "cancelled"
+        if precedente and not any((_d(f.get("date")) or date.min) >= precedente and f.get("statut") not in STATUTS_HORS_FACTURE
                                   for f in factures):
             e("ECHEANCE_MANQUANTE", "bloquant", f"Échéance du {_fr(precedente)} non facturée",
               detail="L'abonnement a une occurrence passée sans facture correspondante.",
@@ -230,7 +237,7 @@ def analyser_bail(bail: dict, abonnements: list[dict], factures: list[dict], auj
             e("FACTURE_BROUILLON", "a_traiter", f"Facture du {_fr(d_f)} restée en brouillon",
               detail=f"{_eur(f['montant_ht'])} HT, en attente de validation depuis {(aujourdhui - d_f).days} jours.",
               action="Valider la facture dans Pennylane", montant=f["montant_ht"])
-        elif (f.get("restant_du") or 0) > 0.005 and ech and ech < aujourdhui and f.get("statut") not in ("draft", "cancelled"):
+        elif (f.get("restant_du") or 0) > 0.005 and ech and ech < aujourdhui and f.get("statut") not in ("draft", *STATUTS_HORS_FACTURE):
             retard = (aujourdhui - ech).days
             e("IMPAYE", "bloquant" if retard > 60 else "a_traiter",
               f"Facture {f.get('numero') or f['id']} impayée depuis {retard} jours",
@@ -276,12 +283,15 @@ def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, regl
         debut = ajouter_mois(fin_courant, pas)
     else:
         debut = ajouter_mois(date(aujourdhui.year, aujourdhui.month, 1), 1)
+        effet = _d(bail.get("date_effet"))
+        while pas > 1 and effet and (debut.year * 12 + debut.month - effet.year * 12 - effet.month) % pas:
+            debut = ajouter_mois(debut, 1)               # calé sur les termes du bail : pas d'échéance à cheval sur la révision
     prochaine = _d(bail.get("date_prochaine_revision"))
     loyer, revise_le, loyer_connu, periode_revisee = bail.get("loyer_attendu_annuel") or 0, _d(bail.get("date_derniere_revision")), True, False
     count = None
     if prochaine and prochaine <= debut:
         # la période proposée commence à la date anniversaire ou après : c'est le loyer RÉVISÉ qui se facture.
-        # Il n'est connu que si l'indice est publié et pris en compte par le classeur d'indexation.
+        # Il n'est connu que si l'indice de cette révision est publié.
         periode_revisee, revise_le = True, prochaine
         loyer_connu = bail.get("loyer_prochain_annuel") is not None
         loyer = bail.get("loyer_prochain_annuel") if loyer_connu else loyer
@@ -324,8 +334,8 @@ def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, regl
             "derniere_occurrence": dernier.isoformat() if dernier else None,
             "envoyable": bail.get("customer_id") is not None,
             "loyer_connu": loyer_connu, "periode_revisee": periode_revisee, "loyer_annuel": loyer,
-            "note": ("Loyer révisé inconnu : l'indice de la révision du " + _fr(revise_le) + " n'est pas pris en compte "
-                     "par le classeur d'indexation. Le montant ci-dessous est l'ancien loyer") if not loyer_connu else
+            "note": ("Loyer révisé inconnu : l'indice de la révision du " + _fr(revise_le) + " n'est pas publié. "
+                     "Le montant ci-dessous est l'ancien loyer") if not loyer_connu else
                     ("Période au loyer révisé le " + _fr(revise_le) + ", bornée à la révision suivante du " + _fr(prochaine))
                     if periode_revisee else
                     ("Borné à la prochaine révision du " + _fr(prochaine)) if count else
@@ -355,7 +365,7 @@ def analyser_dossier(dossier: dict, baux: list[dict], abonnements: list[dict], f
             ecarts.append(Ecart(type="ORPHELIN", gravite="a_traiter", dossier=dossier["code"],
                                 titre=f"Abonnement n° {a['id']} sans bail au référentiel",
                                 detail=f"« {a.get('label', '')} », {_eur(a['montant_ht'])} par occurrence.",
-                                action="Ajouter le bail au classeur d'indexation, ou arrêter l'abonnement",
+                                action="Créer le bail dans la console, ou arrêter l'abonnement",
                                 montant=round(a["montant_ht"] * occurrences_par_an(a), 2)))
     attendu = round(sum(s.attendu_annuel for s in situations), 2)
     facture = round(sum(s.facture_annuel for s in situations), 2)

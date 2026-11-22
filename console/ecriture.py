@@ -103,11 +103,11 @@ def controler(sit: SituationBail, proposition: dict, dossier: dict, envois: list
                       f"{count} occurrence(s), dernière le {_fr(_d(proposition.get('derniere_occurrence')))}" if count
                       else "Aucun nombre d'occurrences : un abonnement sans terme est refusé."))
     c.append(Controle("Loyer de la période connu", bool(proposition.get("loyer_connu")),
-                      ("Loyer révisé de " + _eur(proposition["loyer_annuel"]) + " par an, issu du classeur d'indexation."
+                      ("Loyer révisé de " + _eur(proposition["loyer_annuel"]) + " par an, calculé sur l'indice publié."
                        if proposition.get("periode_revisee") else "Loyer en vigueur, aucune révision avant le terme proposé.")
                       if proposition.get("loyer_connu") else
-                      "L'indice de la révision n'est pas publié, ou le classeur n'est pas à jour : la console ne crée pas "
-                      "d'abonnement à un loyer qu'elle ne connaît pas. Mettre à jour le classeur, puis réimporter."))
+                      "L'indice de la révision n'est pas publié : la console ne crée pas d'abonnement à un loyer "
+                      "qu'elle ne connaît pas."))
 
     fin_courant = _d(sit.courant.get("fin")) if sit.courant else None
     libre = sit.suivant is None and (sit.courant is None or (fin_courant is not None and debut is not None and fin_courant < debut))

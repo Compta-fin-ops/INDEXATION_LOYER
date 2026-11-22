@@ -1,7 +1,7 @@
 """Console de pilotage des loyers facturés sur Pennylane, tous dossiers.
 
-    Pennylane (abonnements, factures)  ──collecte──►  base SQLite
-    Classeurs d'indexation (loyer attendu) ──import──►  base SQLite
+    Baux saisis dans la console + indices INSEE relevés  ──calcul──►  loyer attendu, révisions
+    Pennylane (abonnements, factures)  ──collecte en lecture──►  base SQLite
                                                            │
                                          rapprochement : écarts, échéancier, propositions
                                                            │
@@ -12,4 +12,4 @@ est borné par un nombre d'occurrences qui s'arrête à la date anniversaire ; l
 détecte les abonnements arrivant à terme et propose le suivant au loyer révisé.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

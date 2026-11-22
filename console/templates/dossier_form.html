@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block titre %}{{ 'Nouveau dossier' if creation else d.nom }} · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="fil"><a href="/">Tableau de bord</a> / {% if creation %}Nouveau dossier{% else %}<a href="/dossiers/{{ d.code }}">{{ d.nom }}</a> / Modifier{% endif %}</div>
+<h1>{{ 'Nouveau dossier' if creation else 'Modifier ' ~ d.nom }}</h1>
+<p class="sous-titre">Une société bailleresse. Les coordonnées servent à l'en-tête et à la signature des courriers.</p>
+{% for e in erreurs %}<div class="bandeau erreur">{{ e }}</div>{% endfor %}
+<form method="post" action="{{ '/dossiers' if creation else '/dossiers/' ~ d.code }}" class="carte">
+  <div class="formulaire">
+    <label>Code du dossier{% if creation %}<input name="code" value="{{ d.code or '' }}" required maxlength="12" placeholder="HALLES">{% else %}<input value="{{ d.code }}" disabled>{% endif %}<span class="aide">Court, sans espace. Il ne change plus ensuite.</span></label>
+    <label class="large">Raison sociale<input name="nom" value="{{ d.nom or '' }}" required></label>
+    <label>Forme<input name="forme" value="{{ d.forme or '' }}" placeholder="SCI"></label>
+    <label>SIREN<input name="siren" value="{{ d.siren or '' }}" inputmode="numeric" maxlength="11"></label>
+    <label class="large">Adresse<textarea name="adresse" rows="2">{{ d.adresse or '' }}</textarea></label>
+    <label>Signataire des courriers<input name="signataire" value="{{ d.signataire or '' }}"></label>
+    <label>Qualité<input name="qualite_signataire" value="{{ d.qualite_signataire or '' }}"></label>
+    <label>Ville de signature<input name="ville_signature" value="{{ d.ville_signature or '' }}"></label>
+    <label class="large">Variable d'environnement du jeton Pennylane<input name="variable_jeton" value="{{ d.variable_jeton or '' }}" placeholder="PENNYLANE_TOKEN_{{ d.code or 'CODE' }}" autocomplete="off">
+      <span class="aide">Le nom de la variable, jamais le jeton. Le jeton reste sur le poste qui fait tourner la console et n'entre ni dans la base ni dans le dépôt. Laisser vide tant que le dossier n'est pas raccordé.</span></label>
+  </div>
+  <p class="actions"><button class="principal" type="submit">Enregistrer</button> <a class="bouton" href="{{ '/' if creation else '/dossiers/' ~ d.code }}">Annuler</a></p>
+</form>
+{% endblock %}

@@ -3,21 +3,28 @@
     python -m console demo      charge le portefeuille fictif
     python -m console serve     http://127.0.0.1:8000
 
-La console ne fait que LIRE Pennylane. Les propositions d'abonnement sont affichées, jamais envoyées.
+Les baux sont saisis et calculés ici. Côté Pennylane, la console lit ; elle ne crée un abonnement que
+sur confirmation explicite, verrous levés (console/ecriture.py), et ne modifie ni ne supprime jamais rien.
 """
 from __future__ import annotations
 
 import json
+import re
+import sqlite3
+import tempfile
 import urllib.parse
 from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, db, depot, ecriture, rapprochement as rp, simulation
+from indexation_loyer import calcul
+from indexation_loyer.baux import DECISIONS, INDICES, METHODES, PERIODICITES_FACTURATION, TYPES_BAIL, est_gel
+
+from . import __version__, db, depot, ecriture, pieces, rapprochement as rp, referentiel, simulation
 
 ICI = Path(__file__).resolve().parent
 STATUTS_ABONNEMENT = {"in_progress": "en cours", "not_started": "programmé", "finished": "terminé", "stopped": "arrêté",
@@ -46,7 +53,14 @@ def _date_fr(v) -> str:
     return d.strftime("%d/%m/%Y") if d else "—"
 
 
-def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None = None) -> FastAPI:
+FICTIF = "portefeuille fictif"
+RE_VARIABLE_JETON = re.compile(r"^PENNYLANE_TOKEN_[A-Z0-9_]+$")
+
+
+def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None = None,
+              chemin_indices: Path | None = None, stockage: Path | None = None) -> FastAPI:
+    stockage = Path(stockage) if stockage else (
+        db.RACINE / "data" / "pieces" if str(chemin_db) == ":memory:" else Path(chemin_db).parent / "pieces")
     app = FastAPI(title="Console des loyers", version=__version__, docs_url="/api/docs", redoc_url=None)
     app.mount("/static", StaticFiles(directory=ICI / "static"), name="static")
     gabarits = Jinja2Templates(directory=ICI / "templates")
@@ -55,12 +69,33 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
     cx = db.connecter(chemin_db)
     jour = lambda: aujourdhui or date.today()
 
+    @app.middleware("http")
+    async def meme_origine(request: Request, suite):
+        """Une page d'un autre site ne doit pas pouvoir poster un formulaire vers la console."""
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            origine = request.headers.get("origin")
+            if origine and urllib.parse.urlsplit(origine).netloc != request.headers.get("host"):
+                return PlainTextResponse("Requête refusée : elle ne vient pas de la console.", status_code=403)
+        return await suite(request)
+
     def analyses(code: str | None = None) -> list[dict]:
         return [rp.analyser_dossier(x["dossier"], x["baux"], x["abonnements"], x["factures"], jour())
-                for x in depot.charger(cx, code)]
+                for x in depot.charger(cx, code, jour(), chemin_indices)]
+
+    def table_indices() -> dict:
+        return calcul.table_indices(referentiel.lire_indices(chemin_indices))
 
     def est_simule() -> bool:
-        return cx.execute("SELECT COUNT(*) AS n FROM dossiers WHERE source_referentiel<>'portefeuille fictif'").fetchone()["n"] == 0
+        """Vrai tant que la base ne porte que le portefeuille fictif (ou rien) : aucun appel à Pennylane."""
+        r = cx.execute("SELECT COUNT(*) AS n, SUM(source_referentiel<>?) AS reels FROM dossiers", (FICTIF,)).fetchone()
+        return r["n"] > 0 and not r["reels"]
+
+    def est_fictif(code: str) -> bool:
+        r = cx.execute("SELECT source_referentiel FROM dossiers WHERE code=?", (code,)).fetchone()
+        return r is not None and r["source_referentiel"] == FICTIF
+
+    async def formulaire(request: Request) -> dict[str, str]:
+        return {k: v for k, v in (await request.form()).items() if isinstance(v, str)}
 
     def contexte(request: Request, **kw) -> dict:
         derniere = cx.execute("SELECT MAX(horodatage) AS h, MAX(source) AS s FROM synchros").fetchone()
@@ -123,33 +158,260 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
             raise HTTPException(404, "Dossier inconnu")
         return gabarits.TemplateResponse(request, "dossier.html", contexte(request, page="bord", a=an[0], s=synthese(an)))
 
-    @app.get("/baux/{bail_id}", response_class=HTMLResponse)
-    def bail(request: Request, bail_id: int):
-        ligne = cx.execute("SELECT dossier FROM baux WHERE id=?", (bail_id,)).fetchone()
+    # ------------------------------------------------------------------ dossiers
+    def page_dossier_form(request: Request, d: dict, erreurs: list[str], creation: bool, statut: int = 200):
+        return gabarits.TemplateResponse(request, "dossier_form.html", contexte(
+            request, page="bord", d=d, erreurs=erreurs, creation=creation), status_code=statut)
+
+    def valider_dossier(champs: dict[str, str], creation: bool) -> tuple[dict, list[str]]:
+        t = lambda nom: (champs.get(nom) or "").strip()
+        d = {c: t(c) for c in ("code", "nom", "siren", "forme", "adresse", "signataire", "qualite_signataire",
+                               "ville_signature", "variable_jeton")}
+        d["code"], d["variable_jeton"] = d["code"].upper(), d["variable_jeton"].upper()
+        d["siren"] = d["siren"].replace(" ", "")
+        erreurs = []
+        if creation and not re.fullmatch(r"[A-Z0-9_]{2,12}", d["code"]):
+            erreurs.append("Code du dossier : 2 à 12 lettres majuscules, chiffres ou soulignés.")
+        if not d["nom"]:
+            erreurs.append("Raison sociale : champ obligatoire.")
+        if d["siren"] and not re.fullmatch(r"\d{9}", d["siren"]):
+            erreurs.append("SIREN : 9 chiffres.")
+        if d["variable_jeton"] and not RE_VARIABLE_JETON.fullmatch(d["variable_jeton"]):
+            erreurs.append("Jeton Pennylane : saisir le NOM de la variable d'environnement, de la forme "
+                           "PENNYLANE_TOKEN_CODE. Le jeton lui-même ne se saisit jamais dans la console.")
+            d["variable_jeton"] = ""                      # ne jamais réafficher ce qui pourrait être un jeton
+        if creation and d["code"] and cx.execute("SELECT 1 FROM dossiers WHERE code=?", (d["code"],)).fetchone():
+            erreurs.append(f"Code du dossier : {d['code']} existe déjà.")
+        return d, erreurs
+
+    @app.get("/nouveau-dossier", response_class=HTMLResponse)
+    def dossier_nouveau(request: Request):
+        return page_dossier_form(request, {"qualite_signataire": "Gérant"}, [], True)
+
+    @app.post("/dossiers")
+    async def dossier_creer(request: Request):
+        d, erreurs = valider_dossier(await formulaire(request), True)
+        if erreurs:
+            return page_dossier_form(request, d, erreurs, True, 400)
+        cx.execute("""INSERT INTO dossiers (code, nom, siren, variable_jeton, source_referentiel, forme, adresse, signataire,
+                      qualite_signataire, ville_signature) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                   (d["code"], d["nom"], d["siren"], d["variable_jeton"], "console", d["forme"], d["adresse"],
+                    d["signataire"], d["qualite_signataire"] or "Gérant", d["ville_signature"]))
+        referentiel.tracer(cx, "Dossier créé", d["nom"], d["code"])
+        cx.commit()
+        return RedirectResponse(f"/dossiers/{d['code']}", status_code=303)
+
+    @app.get("/dossiers/{code}/modifier", response_class=HTMLResponse)
+    def dossier_modifier(request: Request, code: str):
+        d = cx.execute("SELECT * FROM dossiers WHERE code=?", (code,)).fetchone()
+        if d is None:
+            raise HTTPException(404, "Dossier inconnu")
+        return page_dossier_form(request, dict(d), [], False)
+
+    @app.post("/dossiers/{code}")
+    async def dossier_enregistrer(request: Request, code: str):
+        avant = cx.execute("SELECT * FROM dossiers WHERE code=?", (code,)).fetchone()
+        if avant is None:
+            raise HTTPException(404, "Dossier inconnu")
+        d, erreurs = valider_dossier({**await formulaire(request), "code": code}, False)
+        if erreurs:
+            return page_dossier_form(request, {**d, "code": code}, erreurs, False, 400)
+        colonnes = ("nom", "siren", "forme", "adresse", "signataire", "qualite_signataire", "ville_signature", "variable_jeton")
+        changes = [c for c in colonnes if (avant[c] or "") != d[c]]
+        cx.execute(f"UPDATE dossiers SET {', '.join(f'{c}=?' for c in colonnes)} WHERE code=?", [*(d[c] for c in colonnes), code])
+        if changes:
+            referentiel.tracer(cx, "Dossier modifié", "Champs : " + ", ".join(changes), code)
+        cx.commit()
+        return RedirectResponse(f"/dossiers/{code}", status_code=303)
+
+    # ---------------------------------------------------------------------- baux
+    def ligne_bail(bail_id: int) -> dict:
+        ligne = cx.execute("SELECT * FROM baux WHERE id=?", (bail_id,)).fetchone()
         if ligne is None:
             raise HTTPException(404, "Bail inconnu")
-        a = analyses(ligne["dossier"])[0]
+        return dict(ligne)
+
+    def revisions(b: dict) -> tuple:
+        """(bail du moteur, lignes de révision, décisions par numéro) d'un bail calculé par la console."""
+        dec = referentiel.decisions_du_bail(cx, b["id"])
+        bail_m, lignes = referentiel.reviser(b, table_indices(), {n: d["decision"] for n, d in dec.items()}, jour())
+        return bail_m, lignes, dec
+
+    def page_bail_form(request: Request, dossier: dict, b: dict, erreurs: list[str], bail_id: int | None, statut: int = 200,
+                       avertissement: str | None = None):
+        return gabarits.TemplateResponse(request, "bail_form.html", contexte(
+            request, page="bord", dossier=dossier, b=b, erreurs=erreurs, bail_id=bail_id, avertissement=avertissement,
+            choix={"type_bail": TYPES_BAIL, "periodicite": tuple(PERIODICITES_FACTURATION), "indice": INDICES,
+                   "methode": METHODES}), status_code=statut)
+
+    def dossier_ou_404(code: str) -> dict:
+        d = cx.execute("SELECT * FROM dossiers WHERE code=?", (code,)).fetchone()
+        if d is None:
+            raise HTTPException(404, "Dossier inconnu")
+        return dict(d)
+
+    @app.get("/dossiers/{code}/baux/nouveau", response_class=HTMLResponse)
+    def bail_nouveau(request: Request, code: str):
+        d = dossier_ou_404(code)
+        pris = {r["code"] for r in cx.execute("SELECT code FROM baux WHERE dossier=?", (code,))}
+        suivant = next(f"B{i:02d}" for i in range(1, 1000) if f"B{i:02d}" not in pris)
+        return page_bail_form(request, d, {"code": suivant, "tva_pct": 20, "duree_ans": 9, "periodicite_revision_ans": 1,
+                                           "periodicite": "Mensuelle", "indice": "ILC", "methode": "Chaînée",
+                                           "type_bail": "Commercial"}, [], None)
+
+    @app.post("/dossiers/{code}/baux")
+    async def bail_creer(request: Request, code: str):
+        d = dossier_ou_404(code)
+        champs = await formulaire(request)
+        valeurs, erreurs = referentiel.valider(champs)
+        if valeurs["code"] and cx.execute("SELECT 1 FROM baux WHERE dossier=? AND code=?", (code, valeurs["code"])).fetchone():
+            erreurs.append(f"Code du bail : {valeurs['code']} existe déjà dans ce dossier.")
+        if erreurs:
+            return page_bail_form(request, d, champs, erreurs, None, 400)
+        return RedirectResponse(f"/baux/{referentiel.enregistrer_bail(cx, code, valeurs)}", status_code=303)
+
+    @app.get("/baux/{bail_id}/modifier", response_class=HTMLResponse)
+    def bail_modifier(request: Request, bail_id: int):
+        b = ligne_bail(bail_id)
+        return page_bail_form(request, dossier_ou_404(b["dossier"]), b, [], bail_id,
+                              avertissement=referentiel.controler_indice_de_depart(b, table_indices()) if b["calcule"] else None)
+
+    @app.post("/baux/{bail_id}")
+    async def bail_enregistrer(request: Request, bail_id: int):
+        b = ligne_bail(bail_id)
+        champs = await formulaire(request)
+        valeurs, erreurs = referentiel.valider(champs)
+        if valeurs["code"] and cx.execute("SELECT 1 FROM baux WHERE dossier=? AND code=? AND id<>?",
+                                          (b["dossier"], valeurs["code"], bail_id)).fetchone():
+            erreurs.append(f"Code du bail : {valeurs['code']} existe déjà dans ce dossier.")
+        if erreurs:
+            return page_bail_form(request, dossier_ou_404(b["dossier"]), champs, erreurs, bail_id, 400)
+        referentiel.enregistrer_bail(cx, b["dossier"], valeurs, bail_id)
+        return RedirectResponse(f"/baux/{bail_id}", status_code=303)
+
+    @app.get("/baux/{bail_id}", response_class=HTMLResponse)
+    def bail(request: Request, bail_id: int, message: str = "", erreur: str = ""):
+        b = ligne_bail(bail_id)
+        a = analyses(b["dossier"])[0]
         s = next(x for x in a["situations"] if x.bail["id"] == bail_id)
         corps = json.dumps(s.proposition["corps"], ensure_ascii=False, indent=2) if s.proposition else None
+        lignes, dec, alerte_indice = [], {}, None
+        if b["calcule"]:
+            _, lignes, dec = revisions(b)
+            alerte_indice = referentiel.controler_indice_de_depart(b, table_indices())
         return gabarits.TemplateResponse(request, "bail.html", contexte(
-            request, page="bord", a=a, sit=s, corps=corps,
+            request, page="bord", a=a, sit=s, corps=corps, lignes=lignes, dec=dec, DECISIONS=DECISIONS,
+            alerte_indice=alerte_indice, message=message, erreur=erreur,
+            pieces=pieces.du_bail(cx, bail_id), NATURES=referentiel.NATURES_PIECE,
+            historique=[dict(r) for r in cx.execute(
+                "SELECT * FROM historique WHERE bail_id=? ORDER BY id DESC LIMIT 15", (bail_id,))],
             n=rp.ECHEANCES_PAR_AN.get(s.bail.get("periodicite"), 12)))
+
+    def retour_bail(bail_id: int, **kw) -> RedirectResponse:
+        return RedirectResponse(f"/baux/{bail_id}?{urllib.parse.urlencode(kw)}", status_code=303)
+
+    @app.post("/baux/{bail_id}/revisions/{numero}")
+    async def revision_decider(request: Request, bail_id: int, numero: int):
+        b = ligne_bail(bail_id)
+        champs = await formulaire(request)
+        erreurs: list[str] = []
+        courrier_le = referentiel._date(champs.get("courrier_le", ""), "date_effet", erreurs)
+        decision = champs.get("decision", DECISIONS[0])
+        if not b["calcule"] or decision not in DECISIONS or erreurs:
+            return retour_bail(bail_id, erreur="Décision refusée : valeur ou date illisible.")
+        referentiel.enregistrer_decision(cx, b, numero, decision, champs.get("commentaire", "").strip(), courrier_le)
+        return retour_bail(bail_id, message=f"Révision n° {numero} : décision enregistrée.")
+
+    @app.get("/baux/{bail_id}/revisions/{numero}/courrier.pdf")
+    def revision_courrier(bail_id: int, numero: int):
+        from indexation_loyer import courriers
+        from indexation_loyer.workbook import Societe
+        b = ligne_bail(bail_id)
+        if not b["calcule"]:
+            raise HTTPException(409, "Bail non calculé par la console : compléter ses paramètres.")
+        bail_m, lignes, _ = revisions(b)
+        l = next((x for x in lignes if x.echeance.numero == numero), None)
+        if l is None:
+            raise HTTPException(404, "Révision inconnue")
+        if l.loyer_precedent is None or l.statut == calcul.STATUT_A_VENIR:
+            raise HTTPException(409, "Rien à notifier : ni indice publié ni décision pour cette révision.")
+        d = dossier_ou_404(b["dossier"])
+        societe = Societe(nom=d["nom"], siren=d["siren"] or "", forme=d["forme"] or "", adresse=d["adresse"] or "",
+                          signataire=d["signataire"] or "", qualite_signataire=d["qualite_signataire"] or "Gérant",
+                          ville_signature=d["ville_signature"] or "", demo=d["source_referentiel"] == FICTIF)
+        with tempfile.TemporaryDirectory() as tmp:
+            contenu = courriers.generer_un(societe, bail_m, l, Path(tmp) / "courrier.pdf", aujourdhui=jour()).read_bytes()
+        nature = "gel" if est_gel(l.decision) else "attente" if l.loyer_retenu is None else "revision"
+        nom = f"{b['dossier']}_{b['code']}_{l.echeance.date_revision:%Y-%m-%d}_{nature}.pdf"
+        referentiel.tracer(cx, "Courrier généré", f"révision n° {numero} du {l.echeance.date_revision:%d/%m/%Y} ({nature})",
+                           b["dossier"], bail_id)
+        cx.commit()
+        return Response(contenu, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{nom}"'})
+
+    @app.post("/baux/{bail_id}/pieces")
+    async def piece_deposer(request: Request, bail_id: int):
+        b = ligne_bail(bail_id)
+        form = await request.form()
+        fichier = form.get("fichier")
+        if fichier is None or isinstance(fichier, str) or not fichier.filename:
+            return retour_bail(bail_id, erreur="Aucun fichier choisi.")
+        contenu = await fichier.read(pieces.TAILLE_MAX + 1)
+        try:
+            pieces.deposer(cx, stockage, b, fichier.filename, contenu, str(form.get("nature") or "Bail"))
+        except pieces.PieceRefusee as exc:
+            return retour_bail(bail_id, erreur=str(exc))
+        return retour_bail(bail_id, message=f"Pièce jointe : {Path(fichier.filename).name}.")
+
+    @app.get("/pieces/{piece_id}")
+    def piece_telecharger(piece_id: int):
+        p = cx.execute("SELECT * FROM pieces WHERE id=?", (piece_id,)).fetchone()
+        chemin = pieces.chemin_fichier(stockage, p["sha256"]) if p else None
+        if p is None or not chemin.exists():
+            raise HTTPException(404, "Pièce introuvable")
+        nom = urllib.parse.quote(p["nom"])
+        return Response(chemin.read_bytes(), media_type=p["type_mime"], headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{nom}", "X-Content-Type-Options": "nosniff"})
+
+    # ------------------------------------------------------------------- indices
+    @app.get("/indices", response_class=HTMLResponse)
+    def page_indices(request: Request):
+        obs = referentiel.lire_indices(chemin_indices)
+        series = []
+        for code in INDICES:
+            valeurs = sorted((o for o in obs if o.serie == code), key=lambda o: o.periode)
+            if valeurs:
+                series.append({"code": code, "dernieres": valeurs[-5:][::-1], "releve": max(o.date_extraction for o in valeurs)})
+        table, suivi = calcul.table_indices(obs), []
+        noms = {r["code"]: r["nom"] for r in cx.execute("SELECT code, nom FROM dossiers")}
+        for b in map(dict, cx.execute("SELECT * FROM baux WHERE calcule=1 AND date_effet IS NOT NULL ORDER BY dossier, code").fetchall()):
+            dec = {n: d["decision"] for n, d in referentiel.decisions_du_bail(cx, b["id"]).items()}
+            _, lignes = referentiel.reviser(b, table, dec, jour())
+            echues_sans_indice = [l for l in lignes if l.statut == calcul.STATUT_ATTENDU]
+            prochaine = next((l for l in lignes if l.echeance.date_revision > jour()), None)
+            for l in [*echues_sans_indice[-1:], *([prochaine] if prochaine else [])]:
+                suivi.append({"bail": b, "nom": noms.get(b["dossier"], b["dossier"]), "l": l,
+                              "jours": (l.echeance.date_revision - jour()).days})
+        suivi.sort(key=lambda x: x["l"].echeance.date_revision)
+        return gabarits.TemplateResponse(request, "indices.html", contexte(request, page="indices", series=series, suivi=suivi))
 
     def collecter(code: str | None = None) -> list[dict]:
         from .pennylane_api import ClientReel
-        variables = {r["code"]: r["variable_jeton"] for r in cx.execute("SELECT code, variable_jeton FROM dossiers")}
-        return depot.synchroniser(cx, ClientReel(variables), [code] if code else None, source="pennylane")
+        variables = {r["code"]: r["variable_jeton"] for r in cx.execute(
+            "SELECT code, variable_jeton FROM dossiers WHERE source_referentiel<>?", (FICTIF,))}   # jamais le fictif
+        if code and code not in variables:
+            return [{"dossier": code, "ok": False, "message": "dossier fictif : aucune collecte"}]
+        if not variables:
+            return []
+        return depot.synchroniser(cx, ClientReel(variables), [code] if code else sorted(variables), source="pennylane")
 
     def preparer(bail_id: int):
         """(analyse du dossier, situation du bail, proposition au mode brouillon imposé, contrôles)."""
-        ligne = cx.execute("SELECT dossier FROM baux WHERE id=?", (bail_id,)).fetchone()
-        if ligne is None:
-            raise HTTPException(404, "Bail inconnu")
-        a = analyses(ligne["dossier"])[0]
+        a = analyses(ligne_bail(bail_id)["dossier"])[0]
         sit = next(x for x in a["situations"] if x.bail["id"] == bail_id)
         prop = rp.proposer_abonnement(sit.bail, sit.courant, jour())
         prop["corps"] = ecriture.imposer_brouillon(prop["corps"])
-        controles = ecriture.controler(sit, prop, a["dossier"], ecriture.journal(cx, a["dossier"]["code"]), jour(), est_simule())
+        controles = ecriture.controler(sit, prop, a["dossier"], ecriture.journal(cx, a["dossier"]["code"]), jour(),
+                                      a["dossier"]["source_referentiel"] == FICTIF)
         return a, sit, prop, controles
 
     def page_creation(request: Request, bail_id: int, erreur: str = "", statut: int = 200):
@@ -166,12 +428,10 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
     @app.post("/baux/{bail_id}/abonnement")
     async def creer(request: Request, bail_id: int):
         champs = {k: v[0] for k, v in urllib.parse.parse_qs((await request.body()).decode("utf-8")).items()}
-        simule = est_simule()
+        code_dossier = ligne_bail(bail_id)["dossier"]
+        simule = est_fictif(code_dossier)                # un dossier fictif ne déclenche jamais d'appel
         if not simule:                                   # relecture de Pennylane juste avant d'écrire
-            ligne = cx.execute("SELECT dossier FROM baux WHERE id=?", (bail_id,)).fetchone()
-            if ligne is None:
-                raise HTTPException(404, "Bail inconnu")
-            if not all(b["ok"] for b in collecter(ligne["dossier"])):
+            if not all(x["ok"] for x in collecter(code_dossier)):
                 return page_creation(request, bail_id, "Relecture de Pennylane impossible : aucun envoi sans état à jour.", 409)
         a, sit, prop, controles = preparer(bail_id)
         if champs.get("empreinte") != ecriture.empreinte(prop["corps"]):
@@ -217,10 +477,7 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
 
     @app.post("/actions/synchroniser")
     def synchroniser():
-        if est_simule():
-            pass                                         # portefeuille fictif : rien à relire
-        else:
-            collecter()
+        collecter()                                      # dossiers réels seulement ; le fictif n'est jamais relu
         return RedirectResponse("/", status_code=303)
 
     @app.get("/api/synthese")

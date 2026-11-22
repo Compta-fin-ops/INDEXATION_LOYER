@@ -1,19 +1,62 @@
 # Console de pilotage des loyers facturés
 
-**Thèse.** Le classeur d'indexation dit ce que le loyer doit être, Pennylane dit ce qui est facturé. La console
-compare les deux sur tous les dossiers et ne montre que ce qui demande une décision : révision non répercutée,
-abonnement arrivé à terme, bail sans abonnement, échéance non facturée, impayé, facture restée en brouillon.
+**Thèse.** Les baux vivent dans la console : elle calcule ce que le loyer doit être, Pennylane dit ce qui est
+facturé. La console compare les deux sur tous les dossiers et ne montre que ce qui demande une décision : révision
+non répercutée, abonnement arrivé à terme, bail sans abonnement, échéance non facturée, impayé, facture restée en
+brouillon. Il n'y a plus de classeur Excel dans le circuit.
 
 ```
-  Classeurs d'indexation ──importer──►  référentiel des baux : loyer en vigueur, dates de révision
-  Pennylane (API v2)  ──synchroniser, lecture seule──►  abonnements et factures
+  Baux saisis dans la console ─┐
+  Indices INSEE relevés chaque ├─calcul─►  loyer en vigueur, révisions, loyer de la période suivante
+  semaine (ILC, ILAT, ICC, IRL)┘
+  Pennylane (API v2)  ──collecte, lecture seule──►  abonnements et factures
                                    │
-                              base SQLite locale
+                              base SQLite
                                    │
               rapprochement : écarts gradués, échéancier, abonnement proposé
                                    │
-                    console web : tableau de bord, écarts, échéancier, dossier, bail
+     console web : tableau de bord, écarts, échéancier, indices, dossier, bail, pièces, courriers
 ```
+
+## Les baux dans la console
+
+| Besoin | Où |
+|---|---|
+| Créer une société bailleresse | Tableau de bord, « Nouveau dossier » |
+| Saisir un bail : loyer initial, date d'effet, indice, trimestre de départ, périodicité, méthode, plafond | Page du dossier, « Nouveau bail » |
+| Voir les révisions calculées, de la première aux deux prochaines | Page du bail, tableau « Révisions » |
+| Geler une révision, avec ou sans rattrapage, et noter pourquoi | Même tableau : décision, commentaire, date d'envoi du courrier |
+| Éditer le courrier d'information au locataire | Même tableau, lien « PDF » : application, gel ou attente d'indice |
+| Joindre le bail signé, un avenant, un courrier | Page du bail, « Pièces jointes » |
+| Savoir qui a changé quoi | Page du bail, « Historique » |
+| Voir les indices relevés et les révisions qui en dépendent | Page « Indices » |
+
+Trois règles de gestion à connaître.
+
+- **Le loyer n'est pas figé en base.** Il est recalculé à chaque affichage à partir des paramètres du bail, des
+  indices relevés et des décisions de gel. Corriger un paramètre corrige toute la chaîne.
+- **Les révisions continuent après le terme contractuel**, tant qu'aucune date de sortie du locataire n'est saisie.
+  Le terme reste signalé. Un renouvellement qui refixe le loyer se traite par un nouveau bail. C'est un choix de
+  gestion de l'outil, pas une lecture juridique du bail.
+- **Rien ne se supprime.** Un bail se clôt par sa date de sortie ; une pièce jointe ne se retire pas.
+
+Le moteur de calcul est celui du paquet `indexation_loyer`, déjà contrôlé cellule à cellule contre les formules
+de l'ancien classeur. Un test vérifie que la console retrouve, bail par bail, les loyers que le classeur calculait.
+
+### Reprendre un ancien classeur
+
+```bash
+python -m console importer suivi/SCI_DES_HALLES_indexation_loyers.xlsx --dossier HALLES --variable-jeton PENNYLANE_TOKEN_HALLES
+```
+
+Opération de migration, une fois par société : les baux, leurs paramètres, les gels et leurs commentaires passent
+dans la console. Le classeur n'est plus relu ensuite.
+
+### Sauvegarder
+
+La base est désormais la source de vérité. `python -m console sauvegarder` en fait une copie horodatée dans
+`data/sauvegardes`. Les pièces jointes sont des fichiers à part, dans le dossier `pieces` à côté de la base :
+les deux sont à sauvegarder, et aucun n'est versionné.
 
 ## Le principe de facturation : un abonnement par période d'indexation
 
@@ -45,18 +88,20 @@ python -m console serve       # http://127.0.0.1:8000
 ## Passer aux dossiers réels
 
 ```bash
-# 1. référentiel : un import par classeur d'indexation, à refaire après chaque révision
-python -m console importer suivi/SCI_DES_HALLES_indexation_loyers.xlsx --dossier HALLES --variable-jeton PENNYLANE_TOKEN_HALLES
+# 1. créer le dossier et ses baux dans la console (ou reprendre un ancien classeur, voir plus haut)
+python -m console --base data/cabinet.sqlite serve
 
 # 2. jetons : un jeton API Entreprise v2 par dossier, en lecture seule, dans l'environnement
 export PENNYLANE_TOKEN_HALLES=…
 
-# 3. collecte, puis console
-python -m console synchroniser
-python -m console serve
+# 3. collecte
+python -m console --base data/cabinet.sqlite synchroniser
 ```
 
-Le rapprochement d'un bail avec son abonnement se fait par l'identifiant d'abonnement inscrit dans la fiche du
+La démonstration et les dossiers réels ne se mélangent pas : `python -m console demo` refuse de s'exécuter sur
+une base qui contient un dossier réel, et un dossier fictif ne déclenche jamais d'appel à Pennylane.
+
+Le rapprochement d'un bail avec son abonnement se fait par l'identifiant d'abonnement saisi sur le
 bail, à défaut par le client Pennylane ; si un client porte plusieurs baux, l'abonnement va au bail dont le loyer
 par échéance est le plus proche.
 
@@ -66,16 +111,18 @@ par échéance est le plus proche.
 |---|---|
 | Règles de rapprochement, rappel de loyer, proposition d'abonnement | Testées |
 | Verrous de la création d'abonnement, réponse perdue, refus de Pennylane | Testés contre un faux Pennylane, 9 tests |
-| Import du référentiel depuis un classeur d'indexation | Testé sur le classeur de démonstration |
+| Saisie d'un bail, calcul, gel, courrier PDF, pièces jointes, historique, sauvegarde | Testés, 11 tests |
+| Reprise d'un ancien classeur | Testée : la console retrouve les loyers du classeur de démonstration |
 | Pages web et API JSON | Testées |
 | Forme d'un abonnement lu dans Pennylane | Alignée sur l'OpenAPI « Create a billing subscription » fournie par le cabinet |
 | Lecture des abonnements : pagination par curseur, champs, valeurs nulles | Conforme à l'OpenAPI « List billing subscriptions » du 2026-05-27, fournie par le cabinet |
-| Champs d'une facture client | **Non vérifiés** : il manque l'OpenAPI « List customer invoices » |
+| Lecture des factures : pagination, champs, valeurs nulles, filtre sur la date | Conforme à l'OpenAPI « List customer invoices » du 2026-05-27, fournie par le cabinet. Les factures de plus de 36 mois ne sont pas collectées |
+| Avoirs, proformas et devis présents dans la liste des factures | Collectés avec leur statut, écartés du rapprochement. **Signe des montants d'un avoir : inconnu** |
 | Jeton cabinet | La doc indique qu'un jeton cabinet est accepté sur l'API v2 avec l'en-tête `X-Company-Id`. Non exploité : la console utilise un jeton par dossier |
 | Appel réel à Pennylane | **Jamais exécuté**, faute de jeton |
 
-Les deux points non vérifiés sont isolés dans `console/pennylane_api.py`, fonctions `normaliser_abonnement`,
-`normaliser_facture` et `_pages`. C'est le seul fichier à ajuster au premier essai réel.
+Tout ce qui parle à Pennylane en lecture est isolé dans `console/pennylane_api.py`, fonctions
+`normaliser_abonnement`, `normaliser_facture` et `_pages`. C'est le seul fichier à ajuster au premier essai réel.
 
 ## Créer un abonnement depuis la console
 
@@ -120,15 +167,34 @@ export CONSOLE_ECRITURE=oui
 
 ## Sécurité
 
-- Les jetons ne sont ni dans la base ni dans le dépôt : la base ne retient que le nom des variables d'environnement.
-- La console n'a pas d'authentification. Elle écoute sur `127.0.0.1` et ne doit pas être exposée en l'état :
-  quiconque atteint la page peut déclencher une création si l'écriture est activée.
-- La base `data/console.sqlite` contient des données de dossiers : elle est exclue du dépôt.
+- Les jetons ne sont ni dans la base ni dans le dépôt : la base ne retient que le nom des variables
+  d'environnement. Le formulaire de dossier refuse toute valeur qui n'a pas la forme `PENNYLANE_TOKEN_CODE`,
+  pour qu'un jeton collé par erreur ne soit ni enregistré ni réaffiché.
+- **La console n'a pas encore de comptes utilisateurs.** Elle écoute sur `127.0.0.1` et ne doit pas être exposée
+  en l'état : quiconque atteint la page peut modifier un bail, et déclencher une création si l'écriture est
+  activée. L'historique porte « poste local », ou la valeur de `CONSOLE_UTILISATEUR`, faute d'identité.
+- Un formulaire posté depuis un autre site est refusé (contrôle de l'en-tête `Origin`).
+- Une pièce jointe est acceptée si son extension et son contenu concordent (PDF, PNG, JPEG, Word), 25 Mo au
+  plus. Elle est rangée sous son empreinte, jamais sous le nom fourni, et servie en téléchargement.
+- La base et les pièces contiennent des données de dossiers : elles sont exclues du dépôt.
+
+## Limites connues
+
+- **Révision en cours de mois.** Un bail dont la date anniversaire n'est pas le premier du mois est facturé au
+  loyer révisé à partir de l'échéance qui suit ; le prorata du mois de révision n'est pas calculé.
+- **Indice publié après la date anniversaire.** La console signale la révision échue sans indice et refuse de
+  créer un abonnement à un loyer inconnu. La période provisoire à l'ancien loyer, puis le rappel, restent manuels.
+- **Envoi du courrier.** Le PDF est produit par la console ; il n'est ni envoyé ni déposé dans Pennylane.
+  L'API d'envoi par courriel de Pennylane porte sur les factures et les documents commerciaux, avec un modèle
+  de courriel choisi dans Pennylane : elle n'envoie pas une lettre libre. Une facture expose une liste
+  d'annexes en lecture ; la route d'ajout d'une annexe n'a pas été vérifiée.
 
 ## Suite envisagée
 
-1. Essai réel en lecture sur un dossier, pour caler la pagination et les champs de facture.
-2. Première création réelle sur un dossier d'essai, pour constater le statut de l'abonnement créé.
-3. Période provisoire à l'ancien loyer quand l'indice tarde, avec rappel à la publication.
-4. Authentification et hébergement, pour un accès de l'équipe hors du poste.
-5. Collecte planifiée chaque nuit et courriel des écarts bloquants.
+1. Comptes utilisateurs, rôles et session, préalable à tout accès de l'équipe hors du poste.
+2. Essai réel en lecture sur un dossier.
+3. File « à valider » : dès que l'indice d'une révision est publié, abonnement de la période et courrier préparés.
+4. Première création réelle sur un dossier d'essai, pour constater le statut de l'abonnement créé.
+5. Période provisoire à l'ancien loyer quand l'indice tarde, avec rappel à la publication.
+6. Hébergement, base serveur, collecte planifiée chaque nuit et courriel des écarts bloquants.
+7. Mandats de prélèvement : à instruire sur la documentation de Pennylane, rien n'est vérifié à ce jour.

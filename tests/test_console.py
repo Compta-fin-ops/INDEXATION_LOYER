@@ -191,17 +191,25 @@ def test_pages_et_api(base_demo):
     assert c.post("/actions/synchroniser", follow_redirects=False).status_code == 303
 
 
-def test_import_d_un_classeur_d_indexation(tmp_path):
-    """Le référentiel de la console se nourrit du classeur : loyer en vigueur, dates et statut de révision."""
-    from indexation_loyer import demo as demo_indexation
-    classeur = demo_indexation.generer_demo(tmp_path, aujourdhui=date(2026, 9, 9))
+def test_reprise_d_un_classeur_d_indexation(tmp_path):
+    """Migration : les baux, leurs paramètres et les gels passent du classeur à la console, qui recalcule seule."""
+    from indexation_loyer import demo as demo_indexation, insee
+    from indexation_loyer.workbook import lire_indices_classeur
+    jour = date(2026, 9, 9)
+    classeur = demo_indexation.generer_demo(tmp_path, aujourdhui=jour)
+    indices = tmp_path / "indices.csv"
+    insee.ecrire_cache(lire_indices_classeur(classeur), indices)             # les indices fictifs du classeur
     cx = db.connecter(":memory:")
-    assert depot.importer_classeur(cx, classeur, "EXEMPLE", "PENNYLANE_TOKEN_EXEMPLE", aujourdhui=date(2026, 9, 9)) == 4
-    baux = {b["code"]: b for b in depot.charger(cx, "EXEMPLE")[0]["baux"]}
+    assert depot.importer_classeur(cx, classeur, "EXEMPLE", "PENNYLANE_TOKEN_EXEMPLE", aujourdhui=jour) == 4
+    stocke = {r["code"]: dict(r) for r in cx.execute("SELECT * FROM baux")}
+    baux = {b["code"]: b for b in depot.charger(cx, "EXEMPLE", aujourdhui=jour, chemin_indices=indices)[0]["baux"]}
     b01, b03 = baux["B01"], baux["B03"]
-    assert b01["customer_id"] == 100001 and b01["periodicite"] == "Mensuelle"
+    assert b01["calcule"] == 1 and b01["trimestre_base"] and b01["customer_id"] == 100001
     assert b01["loyer_attendu_annuel"] == pytest.approx(24978.23, abs=0.01)      # gel 2025 sans rattrapage
     assert (b01["date_derniere_revision"], b01["date_prochaine_revision"]) == ("2026-04-01", "2027-04-01")
-    assert b01["revisions_non_appliquees"] == 1                                  # la révision 2026 n'est pas cochée
     assert b03["loyer_attendu_annuel"] == pytest.approx(65594.40, abs=0.01)      # rattrapage plafonné
+    # le recalcul de la console retrouve, bail par bail, ce que le classeur avait calculé
+    for code, b in baux.items():
+        assert b["loyer_attendu_annuel"] == pytest.approx(stocke[code]["loyer_attendu_annuel"], abs=0.005), code
+    assert cx.execute("SELECT COUNT(*) AS n FROM decisions WHERE decision LIKE 'Geler%'").fetchone()["n"] >= 1
     assert cx.execute("SELECT variable_jeton FROM dossiers").fetchone()["variable_jeton"] == "PENNYLANE_TOKEN_EXEMPLE"

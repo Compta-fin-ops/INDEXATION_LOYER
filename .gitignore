@@ -12,3 +12,6 @@ out/courriers/
 
 # base locale de la console : données de dossiers
 data/console.sqlite*
+data/*.sqlite*
+data/pieces/
+data/sauvegardes/

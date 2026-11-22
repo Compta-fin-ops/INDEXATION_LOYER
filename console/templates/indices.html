@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block titre %}Indices · Console des loyers{% endblock %}
+{% block contenu %}
+<h1>Indices et révisions</h1>
+<p class="sous-titre">Les séries INSEE relevées chaque semaine, et les révisions qui en dépendent.</p>
+<div class="tuiles">
+{% for s in series %}
+  <div class="tuile"><div class="libelle">{{ s.code }} · {{ s.dernieres[0].periode }}</div><div class="valeur">{{ ('%g' | format(s.dernieres[0].valeur)) | replace('.', ',') }}</div>
+    <div class="note">{% for o in s.dernieres[1:4] %}{{ o.periode[2:] }} : {{ ('%g' | format(o.valeur)) | replace('.', ',') }}{% if not loop.last %} · {% endif %}{% endfor %}<br>relevé du {{ s.releve | date_fr }}</div></div>
+{% else %}<div class="tuile attention"><div class="libelle">Indices</div><div class="valeur">Aucun</div><div class="note">Le relevé INSEE n'a pas encore tourné.</div></div>
+{% endfor %}
+</div>
+<div class="carte">
+  <h2>Révisions échues sans indice, et prochaine révision de chaque bail</h2>
+  <div class="defile"><table>
+    <thead><tr><th>Révision</th><th>Dossier</th><th>Bail</th><th>Indice attendu</th><th class="num">Loyer avant</th><th class="num">Loyer révisé</th><th>État</th></tr></thead>
+    <tbody>
+    {% for x in suivi %}{% set l = x.l %}
+    <tr>
+      <td>{{ l.echeance.date_revision | date_fr }}<div class="discret petit">{{ 'dans ' ~ x.jours ~ ' j' if x.jours >= 0 else 'échue depuis ' ~ (-x.jours) ~ ' j' }}</div></td>
+      <td>{{ x.nom }}</td>
+      <td><a class="fort" href="/baux/{{ x.bail.id }}">{{ x.bail.code }}</a> {{ x.bail.locataire }}</td>
+      <td>{{ x.bail.indice }} {{ l.echeance.trimestre_reference }}</td>
+      <td class="num">{{ l.loyer_precedent | eur2 }}</td>
+      <td class="num">{{ l.loyer_retenu | eur2 }}{% if l.variation_pct is not none and not l.statut.startswith('❄') %}<div class="discret petit">{{ '%+.2f' | format(l.variation_pct * 100) | replace('.', ',') }} %</div>{% endif %}</td>
+      <td>{% if l.statut.startswith('❄') %}<span class="pastille info">Gelée</span>
+          {% elif l.indice_reference is none %}<span class="pastille {{ 'bloquant' if x.jours < 0 else 'neutre' }}">Indice non publié</span>
+          {% else %}<span class="pastille ok">Indice publié</span> <a class="petit" href="/baux/{{ x.bail.id }}/revisions/{{ l.echeance.numero }}/courrier.pdf">courrier</a>{% endif %}</td>
+    </tr>
+    {% else %}<tr><td colspan="7" class="discret">Aucun bail calculé par la console.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}
