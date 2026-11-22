@@ -446,6 +446,9 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         if valeurs["code"] and cx.execute("SELECT 1 FROM baux WHERE dossier=? AND code=? AND id<>?",
                                           (b["dossier"], valeurs["code"], bail_id)).fetchone():
             erreurs.append(f"Code du bail : {valeurs['code']} existe déjà dans ce dossier.")
+        if not erreurs and b["calcule"] and referentiel.calendrier_modifie(b, valeurs) and referentiel.gels_enregistres(cx, bail_id):
+            erreurs.append("Des révisions gelées sont enregistrées sur ce bail, et cette modification changerait les dates ou la "
+                           "numérotation des révisions. Remettre d'abord ces révisions sur « Appliquer », modifier, puis ressaisir les gels.")
         if erreurs:
             return page_bail_form(request, dossier_ou_404(b["dossier"]), champs, erreurs, bail_id, 400)
         referentiel.enregistrer_bail(cx, b["dossier"], valeurs, bail_id)
@@ -491,7 +494,8 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         b = ligne_bail(bail_id)
         if not b["calcule"]:
             raise HTTPException(409, "Bail non calculé par la console : compléter ses paramètres.")
-        bail_m, lignes, _ = revisions(b)
+        _, lignes, _ = revisions(b)
+        bail_m = referentiel.vers_bail(b, affichage=True)        # le courrier cite la vraie date d'effet du bail
         l = next((x for x in lignes if x.echeance.numero == numero), None)
         if l is None:
             raise HTTPException(404, "Révision inconnue")

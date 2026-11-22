@@ -49,6 +49,9 @@ COLONNES = (
     ("Révision tous les (ans)", "periodicite_revision_ans", False, "1, 2 ou 3. 1 par défaut."),
     ("Méthode", "methode", False, " / ".join(METHODES) + ". Chaînée par défaut."),
     ("Plafond annuel (%)", "plafond_annuel_pct", False, "Vide : aucun plafond."),
+    ("Reprise : date de la dernière révision", "reprise_date", False, "Bail repris en cours : date de la dernière révision réellement appliquée. Les trois colonnes « Reprise » vont ensemble."),
+    ("Reprise : loyer annuel HT à cette date", "reprise_loyer_annuel", False, "Loyer réellement en vigueur à cette date, hors charges. La console ne recalcule rien avant."),
+    ("Reprise : trimestre de l'indice appliqué", "reprise_trimestre", False, "Sous la forme 2024-T2 : celui appliqué à cette révision. La suivante prendra le même trimestre, une période plus tard."),
     ("Client Pennylane", "customer_id", False, "Identifiant numérique du client dans Pennylane."),
     ("Abonnement Pennylane", "subscription_id", False, "Seulement si un même client porte plusieurs baux."),
     ("Notes", "notes", False, ""),
@@ -57,10 +60,11 @@ CHAMPS_SOCIETE = ("nom", "forme", "siren", "adresse", "signataire", "qualite_sig
 EXEMPLES = (
     ("HALLES", "SCI des Halles (exemple)", "SCI", "123456789", "1 place du Marché, 37000 Tours", "A. Bailleur", "Gérant", "Tours",
      "B01", "Boulangerie Martin (exemple)", "12 rue des Halles, Tours – local RDC", "", "Commercial", date(2021, 7, 1), 9, "", "",
-     36000, 2400, 20, "Trimestrielle", "ILC", "2021-T1", 1, "Chaînée", "", "", "", ""),
+     36000, 2400, 20, "Trimestrielle", "ILC", "2021-T1", 1, "Chaînée", "", date(2025, 7, 1), 40500, "2025-T1", "", "",
+     "Loyer renégocié en 2025 : repris au loyer constaté"),
     ("HALLES", "SCI des Halles (exemple)", "SCI", "123456789", "1 place du Marché, 37000 Tours", "A. Bailleur", "Gérant", "Tours",
      "", "Cabinet Durand (exemple)", "12 rue des Halles, Tours – bureaux 1er étage", "", "Professionnel", date(2024, 1, 1), 6, "", "",
-     18600, 0, 20, "Mensuelle", "ILAT", "2023-T3", 1, "Chaînée", 3.5, "", "", "Plafond prévu à l'article 5"),
+     18600, 0, 20, "Mensuelle", "ILAT", "2023-T3", 1, "Chaînée", 3.5, "", "", "", "", "", "Plafond prévu à l'article 5"),
 )
 
 

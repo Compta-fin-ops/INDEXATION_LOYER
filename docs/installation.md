@@ -58,6 +58,38 @@ py -3 -m venv .venv
 
 Puis ouvrir `http://127.0.0.1:8000` dans le navigateur.
 
+## Installer avec Git : les mises à jour en un double-clic
+
+Avec le ZIP, chaque mise à jour demande un téléchargement et un copier-coller. Avec Git, c'est un double-clic
+sur `mettre_a_jour.bat`, qui rapporte aussi les derniers indices INSEE. Le passage se fait une fois.
+
+1. **Installer Git** depuis <https://git-scm.com/download/win>, en laissant les options proposées.
+2. **Arrêter la console** : fermer la fenêtre noire.
+3. **Récupérer le code avec Git.** Ouvrir PowerShell et saisir, ligne par ligne :
+
+   ```
+   cd $HOME\Documents
+   git clone -b claude/suivi-reindexations-loyers-ag5rbc https://github.com/Compta-fin-ops/INDEXATION_LOYER.git console-loyers-git
+   ```
+
+   Le dépôt étant privé, une fenêtre s'ouvre la première fois pour s'identifier sur GitHub.
+4. **Reprendre vos données.** Depuis le dossier `data` de l'ancienne installation, copier vers le dossier `data`
+   de la nouvelle (`Documents\console-loyers-git\data`) :
+   - le fichier `cabinet.sqlite` ;
+   - le dossier `pieces` ;
+   - le dossier `sauvegardes`, s'il existe.
+
+   **Ne pas copier le dossier `indices`** : celui de la nouvelle installation est plus récent, et l'écraser
+   bloquerait les mises à jour.
+5. **Lancer** par un double-clic sur `lancer_console.bat` dans le nouveau dossier. Il prépare de nouveau
+   l'environnement, quelques minutes. Les comptes sont dans la base : même identifiant, même mot de passe.
+6. Vérifier que les dossiers et les baux sont là, puis supprimer l'ancien dossier d'installation.
+
+**Ensuite, pour chaque mise à jour** : fermer la console, double-cliquer sur `mettre_a_jour.bat`, relancer.
+Le script sauvegarde la base avant de commencer et refuse d'agir en cas de doute : il ne supprime jamais rien.
+
+> Comme le lanceur, `mettre_a_jour.bat` n'a pas pu être essayé sur Windows.
+
 ## 4. Se connecter, puis créer les autres comptes
 
 1. Saisir l'identifiant et le mot de passe créés à l'étape 3.
@@ -93,7 +125,7 @@ Dans une base séparée, pour ne jamais mélanger avec les vrais dossiers :
 | Mot de passe oublié par un collaborateur | Menu « Comptes » : nouveau mot de passe provisoire |
 | Mot de passe oublié par le seul administrateur | `.venv\Scripts\python -m console --base data\cabinet.sqlite utilisateur mot-de-passe IDENTIFIANT` |
 | Sauvegarder | `.venv\Scripts\python -m console --base data\cabinet.sqlite sauvegarder`, et copier le dossier `data\pieces` |
-| Mettre à jour la console | Télécharger le nouveau ZIP et remplacer les fichiers, **en conservant le dossier `data`** |
+| Mettre à jour la console | Installation Git : double-clic sur `mettre_a_jour.bat`. Installation ZIP : télécharger le nouveau ZIP et copier ses fichiers par-dessus ; le dossier `data` est fusionné, rien n'y est supprimé |
 
 Le dossier `data` contient tout ce qui vous appartient : la base (`cabinet.sqlite`), les pièces jointes
 (`pieces`) et les sauvegardes. Rien d'autre n'est à conserver.

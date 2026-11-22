@@ -317,3 +317,49 @@ def test_import_tout_ou_rien_et_fichiers_refuses(console):
                                   ("x.xlsx", _classeur([]), "feuille « Baux » est vide")):
         r = c.post("/import", files={"fichier": (nom, contenu, "application/octet-stream")})
         assert r.status_code == 400 and attendu in r.text, nom
+
+
+def test_reprise_d_un_bail_en_cours(console, indices):
+    """Historique non recalculable (gel ancien, loyer renégocié) : la console part du loyer constaté à la dernière révision."""
+    from indexation_loyer import calcul, courriers
+    from indexation_loyer.workbook import Societe
+    c, cx, bail_id, _ = console
+    repris = {**BAIL, "code": "B09", "date_effet": "2019-04-01", "loyer_initial_annuel": "20000", "trimestre_base": "2018-T4",
+              "reprise_date": "2025-04-01", "reprise_loyer_annuel": "25 000", "reprise_trimestre": "2024-T4"}
+    for partiel in ({"reprise_loyer_annuel": ""}, {"reprise_trimestre": "2024-T7"}, {"reprise_date": "2018-01-01"}):
+        assert c.post("/dossiers/HALLES/baux", data={**repris, **partiel}).status_code == 400
+    r = c.post("/dossiers/HALLES/baux", data=repris, follow_redirects=False)
+    assert r.status_code == 303
+    id9 = int(r.headers["location"].rsplit("/", 1)[1])
+    b = _bail(cx, id9, indices)
+    # l'indice 2018-T4 n'existe pas dans la série de test : sans reprise, rien ne serait calculable
+    assert b["loyer_attendu_annuel"] == pytest.approx(25367.70, abs=0.01)          # 25 000 × 137,29 / 135,30
+    assert (b["date_derniere_revision"], b["date_prochaine_revision"]) == ("2026-04-01", "2027-04-01")
+    page = c.get(f"/baux/{id9}").text
+    assert "Bail repris en cours" in page and "25 367,70" in page and "01/04/2019" in page
+    assert c.get(f"/baux/{id9}/revisions/1/courrier.pdf").status_code == 200
+    _, lignes = referentiel.reviser(b, calcul.table_indices(referentiel.lire_indices(indices)), {}, AUJ)
+    v = courriers.valeurs_courrier(Societe(nom="SCI"), referentiel.vers_bail(b, affichage=True), lignes[0])
+    assert v["date_effet_bail"] == "01/04/2019" and v["date_revision"] == "01/04/2026"   # le courrier cite la vraie date d'effet
+    # gel 2026 à rattraper : la reprise reste à la dernière révision APPLIQUÉE (2025), le gel se saisit sur la révision 2026
+    c.post(f"/baux/{id9}/revisions/1", data={"decision": "Geler – rattrapage possible", "commentaire": "accord du bailleur"})
+    b = _bail(cx, id9, indices)
+    assert b["loyer_attendu_annuel"] == 25000.0 and b["statut_revision"].startswith("❄")
+    _, lignes = referentiel.reviser(b, calcul.table_indices(referentiel.lire_indices(indices)), {1: "Geler – rattrapage possible"}, AUJ)
+    assert (lignes[1].echeance.trimestre_reference, lignes[1].trimestre_precedent_effectif) == ("2026-T4", "2024-T4")
+    # un trimestre de reprise incohérent avec la date est signalé, sans bloquer
+    assert "éloigné de la révision" in referentiel.controler_indice_de_depart(
+        {"indice": "ILC", "reprise_date": "2026-04-01", "reprise_trimestre": "2024-T4"}, {("ILC", "2024-T4"): 135.30})
+    assert referentiel.controler_indice_de_depart({"indice": "ILC", "reprise_date": "2025-04-01", "reprise_trimestre": "2024-T4"},
+                                                  {("ILC", "2024-T4"): 135.30}) is None
+    # un gel saisi protège le calendrier : on ne déplace pas les révisions sous une décision existante
+    r = c.post(f"/baux/{id9}", data={**repris, "reprise_date": "2024-04-01", "reprise_trimestre": "2023-T4"})
+    assert r.status_code == 400 and "gelées" in r.text
+    assert c.post(f"/baux/{id9}", data={**repris, "notes": "modification sans effet sur le calendrier"},
+                  follow_redirects=False).status_code == 303
+    # même reprise par le fichier d'import
+    fichier = _classeur([{**LIGNE, "Prise d'effet": date(2019, 4, 1), "Trimestre de départ": "2018-T4",
+                          "Reprise : date de la dernière révision": date(2025, 4, 1), "Reprise : loyer annuel HT à cette date": 25000,
+                          "Reprise : trimestre de l'indice appliqué": "2024-T4"}])
+    r = c.post("/import", files={"fichier": ("reprise.xlsx", fichier, XLSX)}, follow_redirects=False)
+    assert "25 367,70" in c.get(r.headers["location"]).text

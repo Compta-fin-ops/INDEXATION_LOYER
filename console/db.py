@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS baux (
     duree_ans INTEGER,
     date_sortie TEXT,                        -- départ du locataire : arrête les révisions
     notes TEXT DEFAULT '',
+    -- point de reprise d'un bail en cours : la console ne recalcule rien avant cette date
+    reprise_date TEXT,                       -- date de la dernière révision appliquée
+    reprise_loyer_annuel REAL,               -- loyer annuel HT en vigueur à cette date
+    reprise_trimestre TEXT,                  -- trimestre de l'indice appliqué à cette révision
     UNIQUE (dossier, code)
 );
 CREATE TABLE IF NOT EXISTS decisions (             -- décision du bailleur sur une échéance de révision
@@ -189,7 +193,8 @@ MIGRATIONS = {
              ("type_bail", "TEXT DEFAULT 'Commercial'"), ("adresse_locataire", "TEXT DEFAULT ''"),
              ("trimestre_base", "TEXT DEFAULT ''"), ("periodicite_revision_ans", "INTEGER DEFAULT 1"),
              ("methode", "TEXT DEFAULT 'Chaînée'"), ("plafond_annuel_pct", "REAL"), ("duree_ans", "INTEGER"),
-             ("date_sortie", "TEXT"), ("notes", "TEXT DEFAULT ''")),
+             ("date_sortie", "TEXT"), ("notes", "TEXT DEFAULT ''"),
+             ("reprise_date", "TEXT"), ("reprise_loyer_annuel", "REAL"), ("reprise_trimestre", "TEXT")),
     "envois": (("auteur", "TEXT DEFAULT ''"),),
 }
 

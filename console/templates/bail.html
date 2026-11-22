@@ -22,6 +22,7 @@
       <dt>Loyer après cette révision</dt><dd>{% if sit.bail.loyer_prochain_annuel is not none %}{{ sit.bail.loyer_prochain_annuel | eur2 }} par an{% else %}<span class="discret">inconnu, indice non publié</span>{% endif %}</dd>
       <dt>Terme du bail</dt><dd>{{ sit.bail.date_fin | date_fr }}{% if sit.bail.date_sortie %} · sortie le {{ sit.bail.date_sortie | date_fr }}{% endif %}</dd>
     </dl>
+    {% if sit.bail.reprise_date %}<p class="petit" style="margin: 12px 0 0"><span class="pastille neutre">Bail repris en cours</span> Loyer de {{ sit.bail.reprise_loyer_annuel | eur2 }} constaté au {{ sit.bail.reprise_date | date_fr }}, indice {{ sit.bail.reprise_trimestre }}. Les révisions antérieures ne sont pas recalculées.</p>{% endif %}
     {% if not sit.bail.calcule %}<p class="discret petit" style="margin: 12px 0 0">Ces montants ont été importés et ne sont pas recalculés. <a href="/baux/{{ sit.bail.id }}/modifier">Compléter les paramètres du bail</a> pour que la console calcule les révisions.</p>{% endif %}
     {% if sit.bail.notes %}<p class="petit" style="margin: 12px 0 0"><span class="fort">Notes.</span> {{ sit.bail.notes }}</p>{% endif %}
   </div>

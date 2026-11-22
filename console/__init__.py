@@ -12,4 +12,4 @@ est borné par un nombre d'occurrences qui s'arrête à la date anniversaire ; l
 détecte les abonnements arrivant à terme et propose le suivant au loyer révisé.
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

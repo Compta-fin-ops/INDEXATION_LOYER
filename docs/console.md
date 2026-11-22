@@ -44,6 +44,27 @@ Trois règles de gestion à connaître.
 Le moteur de calcul est celui du paquet `indexation_loyer`, déjà contrôlé cellule à cellule contre les formules
 de l'ancien classeur. Un test vérifie que la console retrouve, bail par bail, les loyers que le classeur calculait.
 
+### Reprendre un bail en cours, avec son historique
+
+| Situation | Comment la saisir |
+|---|---|
+| Toutes les révisions ont été appliquées selon la clause | Loyer initial, date d'effet, trimestre de départ. La console recalcule toute la chaîne ; le loyer en vigueur doit retomber sur le loyer facturé |
+| Une révision passée a été gelée, le reste est conforme | Même saisie, puis sur la page du bail, tableau « Révisions » : décision « Geler » sur l'année concernée, avec le commentaire |
+| L'historique ne se recalcule pas : loyer renégocié, avenant, révision oubliée, gel mal documenté | Point de reprise : date de la dernière révision appliquée, loyer en vigueur à cette date, trimestre de l'indice appliqué. La console ne recalcule rien avant |
+
+Le point de reprise se saisit dans le formulaire du bail, ou par les trois colonnes « Reprise » du fichier
+d'import. Trois règles :
+
+- le trimestre de reprise est celui appliqué à la révision de reprise ; la révision suivante prend le même
+  trimestre, une période plus tard ;
+- un gel postérieur à la reprise se saisit dans le tableau des révisions, pas dans la reprise ;
+- les dates anniversaires des révisions deviennent celles de la date de reprise. C'est aussi le moyen de
+  traiter un bail révisé à une date qui n'est pas l'anniversaire de sa prise d'effet.
+
+La date d'effet et le loyer d'origine restent sur la fiche et dans les courriers. Une fois un gel saisi, la
+console refuse de modifier la date d'effet, la périodicité de révision ou la date de reprise : les gels ne
+viseraient plus la bonne année.
+
 ### Importer en lot depuis Excel ou CSV
 
 1. Page « Importer » : télécharger le modèle Excel. Il contient la feuille « Baux » à remplir, un exemple et la

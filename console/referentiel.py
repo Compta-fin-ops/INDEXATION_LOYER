@@ -27,7 +27,8 @@ NATURES_PIECE = ("Bail", "Avenant", "Courrier", "État des lieux", "Autre")
 CHAMPS_BAIL = ("code", "local", "locataire", "adresse_locataire", "type_bail", "date_effet", "duree_ans", "date_fin",
                "date_sortie", "loyer_initial_annuel", "charges_annuelles", "tva_pct", "periodicite", "indice",
                "trimestre_base", "periodicite_revision_ans", "methode", "plafond_annuel_pct", "customer_id",
-               "subscription_id", "notes")
+               "subscription_id", "notes", "reprise_date", "reprise_loyer_annuel", "reprise_trimestre")
+CHAMPS_CALENDRIER = ("date_effet", "periodicite_revision_ans", "reprise_date")   # ils fixent la numérotation des révisions
 CHAMPS_CALCULES = ("loyer_attendu_annuel", "date_derniere_revision", "date_prochaine_revision", "loyer_prochain_annuel",
                    "date_revision_suivante", "statut_revision", "loyer_precedent_annuel")
 LIBELLES = {
@@ -38,6 +39,8 @@ LIBELLES = {
     "indice": "Indice", "trimestre_base": "Trimestre de l'indice de départ", "periodicite_revision_ans": "Révision tous les",
     "methode": "Méthode", "plafond_annuel_pct": "Plafond annuel", "customer_id": "Client Pennylane",
     "subscription_id": "Abonnement Pennylane", "notes": "Notes",
+    "reprise_date": "Reprise : date de la dernière révision", "reprise_loyer_annuel": "Reprise : loyer annuel HT à cette date",
+    "reprise_trimestre": "Reprise : trimestre de l'indice appliqué",
 }
 
 _cache_indices: dict = {}
@@ -74,14 +77,19 @@ def _annees(d: date, n: int) -> date:
         return d.replace(year=d.year + n, day=28)
 
 
-def vers_bail(ligne: dict) -> Bail:
+def vers_bail(ligne: dict, affichage: bool = False) -> Bail:
     """Ligne de la table ``baux`` vers l'objet du moteur. Le calendrier n'est borné que par la sortie
-    du locataire : ``duree_ans`` est neutralisé pour que le terme contractuel n'arrête pas les révisions."""
+    du locataire : ``duree_ans`` est neutralisé pour que le terme contractuel n'arrête pas les révisions.
+
+    Bail repris en cours : le moteur part du point de reprise (date, loyer et indice de la dernière
+    révision appliquée) et ne recalcule rien avant. ``affichage`` rend la vraie date d'effet, pour un courrier."""
+    reprise = bool(ligne.get("reprise_date")) and not affichage
     return Bail(
         id=ligne["code"], local=ligne.get("local") or "", locataire=ligne.get("locataire") or "",
-        date_effet=_d(ligne["date_effet"]), loyer_initial_annuel_ht=float(ligne.get("loyer_initial_annuel") or 0),
+        date_effet=_d(ligne["reprise_date"] if reprise else ligne["date_effet"]),
+        loyer_initial_annuel_ht=float((ligne.get("reprise_loyer_annuel") if reprise else ligne.get("loyer_initial_annuel")) or 0),
         adresse_locataire=ligne.get("adresse_locataire") or "", indice=ligne.get("indice") or "ILC",
-        trimestre_base=ligne.get("trimestre_base") or "",
+        trimestre_base=(ligne.get("reprise_trimestre") if reprise else ligne.get("trimestre_base")) or "",
         periodicite_revision_ans=int(ligne.get("periodicite_revision_ans") or 1),
         methode=ligne.get("methode") or "Chaînée", periodicite_facturation=ligne.get("periodicite") or "Mensuelle",
         tva_pct=float(ligne.get("tva_pct") if ligne.get("tva_pct") is not None else 20.0),
@@ -108,7 +116,8 @@ def deriver(ligne: dict, indices: dict, decisions: dict[int, str], aujourdhui: d
     return {
         "loyer_attendu_annuel": calcul.loyer_actuel(bail, lignes, aujourdhui),
         "loyer_precedent_annuel": effectives[-1].loyer_precedent if effectives else None,
-        "date_derniere_revision": effectives[-1].echeance.date_revision.isoformat() if effectives else None,
+        "date_derniere_revision": effectives[-1].echeance.date_revision.isoformat() if effectives
+        else (str(ligne["reprise_date"])[:10] if ligne.get("reprise_date") else None),       # à défaut, celle de la reprise
         "date_prochaine_revision": a_venir[0].echeance.date_revision.isoformat() if a_venir else None,
         "loyer_prochain_annuel": a_venir[0].loyer_retenu if a_venir else None,
         "date_revision_suivante": a_venir[1].echeance.date_revision.isoformat() if len(a_venir) > 1 else None,
@@ -206,6 +215,22 @@ def valider(champs: dict[str, str]) -> tuple[dict, list[str]]:
         for nom in ("date_fin", "date_sortie"):
             if v[nom] and v[nom] <= v["date_effet"]:
                 e.append(f"{LIBELLES[nom]} : antérieure à la prise d'effet.")
+    # point de reprise d'un bail en cours : trois champs, tous ou aucun
+    v["reprise_date"] = _date(t("reprise_date"), "reprise_date", e)
+    v["reprise_loyer_annuel"] = _nombre(t("reprise_loyer_annuel"), "reprise_loyer_annuel", e)
+    v["reprise_trimestre"] = t("reprise_trimestre").upper().replace("Q", "T") or None
+    saisis = [v[c] is not None for c in ("reprise_date", "reprise_loyer_annuel", "reprise_trimestre")]
+    if any(saisis) and not all(saisis):
+        e.append("Reprise d'un bail en cours : renseigner les trois champs (date, loyer, trimestre de l'indice), ou aucun.")
+    elif all(saisis):
+        if v["reprise_loyer_annuel"] == 0:
+            e.append("Reprise : loyer annuel nul.")
+        if v["date_effet"] and v["reprise_date"] < v["date_effet"]:
+            e.append("Reprise : date antérieure à la prise d'effet du bail.")
+        try:
+            Trimestre.parse(v["reprise_trimestre"])
+        except ValueError:
+            e.append(f"Reprise : trimestre « {v['reprise_trimestre']} » illisible (attendu AAAA-Tn, par exemple 2024-T2).")
     if v["trimestre_base"]:
         try:
             Trimestre.parse(v["trimestre_base"])
@@ -215,12 +240,32 @@ def valider(champs: dict[str, str]) -> tuple[dict, list[str]]:
 
 
 def controler_indice_de_depart(valeurs: dict, indices: dict) -> str | None:
-    """Avertissement, non bloquant : l'indice de départ doit exister dans la série."""
-    cle = (valeurs.get("indice"), valeurs.get("trimestre_base"))
+    """Avertissement, non bloquant : l'indice de départ (ou celui de la reprise) doit exister dans la série."""
+    cle = (valeurs.get("indice"), valeurs.get("reprise_trimestre") or valeurs.get("trimestre_base"))
     if cle[1] and cle not in indices:
         return (f"L'indice {cle[0]} du {cle[1]} est absent des séries relevées : aucune révision ne pourra être "
                 "calculée tant que ce trimestre n'est pas corrigé.")
+    if valeurs.get("reprise_date") and valeurs.get("reprise_trimestre"):
+        try:
+            t, r = Trimestre.parse(valeurs["reprise_trimestre"]), Trimestre.de_date(_d(valeurs["reprise_date"]))
+        except ValueError:
+            return None
+        ecart = (r.annee * 4 + r.numero) - (t.annee * 4 + t.numero)
+        if ecart > 4 or ecart < 0:
+            return (f"Reprise : l'indice du {t.fr} est éloigné de la révision du {_aff(str(valeurs['reprise_date'])[:10])}. "
+                    "Ce trimestre doit être celui appliqué à cette révision : la suivante prendra le même trimestre, "
+                    "une période plus tard. Un gel à rattraper se saisit dans le tableau des révisions, pas ici.")
     return None
+
+
+def gels_enregistres(cx: sqlite3.Connection, bail_id: int) -> int:
+    return cx.execute("SELECT COUNT(*) AS n FROM decisions WHERE bail_id=? AND decision<>?", (bail_id, DECISIONS[0])).fetchone()["n"]
+
+
+def calendrier_modifie(avant: dict, valeurs: dict) -> bool:
+    """Vrai si la modification déplace ou renumérote les révisions : les gels saisis ne viseraient plus la bonne année."""
+    norme = lambda v: None if v in (None, "") else str(v)[:10]
+    return any(norme(avant.get(c)) != norme(valeurs.get(c)) for c in CHAMPS_CALENDRIER)
 
 
 # ---------------------------------------------------------------------------

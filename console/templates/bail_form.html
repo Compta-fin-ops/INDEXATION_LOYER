@@ -44,6 +44,15 @@
   </div>
 </div>
 <div class="carte">
+  <h2>Reprise d'un bail en cours, facultatif</h2>
+  <p class="discret petit" style="margin: 0 0 12px">À remplir quand l'historique ne se recalcule pas depuis l'origine : gel ancien, loyer renégocié, avenant, révision oubliée. La console part alors du loyer constaté à la dernière révision appliquée et ne recalcule rien avant. Les trois champs vont ensemble. Un gel postérieur à cette date se saisit ensuite, dans le tableau des révisions du bail.</p>
+  <div class="formulaire">
+    <label>Date de la dernière révision appliquée<input type="date" name="reprise_date" value="{{ (b.reprise_date or '')[:10] }}"><span class="aide">Les révisions suivantes tombent à ses dates anniversaires.</span></label>
+    <label>Loyer annuel HT à cette date<input name="reprise_loyer_annuel" value="{{ nb(b.reprise_loyer_annuel) }}" inputmode="decimal"><span class="aide">Le loyer réellement en vigueur, hors charges.</span></label>
+    <label>Trimestre de l'indice appliqué<input name="reprise_trimestre" value="{{ b.reprise_trimestre or '' }}" placeholder="2024-T2"><span class="aide">Celui appliqué à cette révision. La suivante prendra le même trimestre, une période plus tard.</span></label>
+  </div>
+</div>
+<div class="carte">
   <h2>Pennylane et notes</h2>
   <div class="formulaire">
     <label>Identifiant du client Pennylane<input name="customer_id" value="{{ b.customer_id if b.customer_id is not none else '' }}" inputmode="numeric"><span class="aide">Sert à rattacher les abonnements et les factures du locataire.</span></label>
