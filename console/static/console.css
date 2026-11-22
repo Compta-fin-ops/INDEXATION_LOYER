@@ -79,3 +79,19 @@ pre { background: var(--fond); border: 1px solid var(--trait); border-radius: 8p
 .ecart-ligne { display: grid; gap: 2px; }
 footer { color: var(--discret); font-size: 12px; margin-top: 26px; }
 @media (max-width: 900px) { .grille { grid-template-columns: 1fr; } .entete-droite { margin-left: 0; } }
+
+.bandeau.erreur { background: var(--rouge-doux); color: var(--rouge); border-color: color-mix(in srgb, var(--rouge) 25%, transparent); }
+a.bouton { display: inline-block; text-decoration: none; margin-right: 10px; }
+a.bouton:hover { border-color: var(--marque); }
+button.principal { background: var(--marque); color: var(--carte); border-color: var(--marque); }
+button.principal:hover { color: var(--carte); filter: brightness(1.1); }
+.controles { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+.controles li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; }
+.controles .marqueur { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; margin-top: 1px; }
+.controles .passe .marqueur { background: var(--vert-doux); color: var(--vert); }
+.controles .echec .marqueur { background: var(--rouge-doux); color: var(--rouge); }
+.controles .avert .marqueur { background: var(--ambre-doux); color: var(--ambre); }
+.controles .echec .fort { color: var(--rouge); }
+.confirmation { display: flex; gap: 14px; align-items: end; flex-wrap: wrap; }
+.confirmation label { display: grid; gap: 5px; }
+input[type=text] { font: inherit; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--trait); background: var(--carte); color: var(--encre); width: 160px; }

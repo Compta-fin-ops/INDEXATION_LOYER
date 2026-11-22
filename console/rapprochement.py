@@ -202,7 +202,9 @@ def analyser_bail(bail: dict, abonnements: list[dict], factures: list[dict], auj
                 ajouter_mois(fin, _pas_mois(c)) - aujourdhui <= timedelta(days=DELAI_RENOUVELLEMENT)):
             e("RENOUVELLEMENT", "a_traiter",
               f"Dernière occurrence le {_fr(fin)} : préparer la période du {_fr(ajouter_mois(fin, _pas_mois(c)))}",
-              detail=f"Statut de la révision : {bail.get('statut_revision') or 'non renseigné'}.",
+              detail=("Loyer révisé connu : " + _eur(bail["loyer_prochain_annuel"]) + " par an."
+                      if bail.get("loyer_prochain_annuel") is not None else
+                      "Loyer révisé non encore connu : indice à publier ou classeur à mettre à jour."),
               action="Créer l'abonnement suivant au loyer révisé", montant=s.attendu_annuel)
         precedente = _d(c.get("occurrence_precedente"))
         if precedente and not any((_d(f.get("date")) or date.min) >= precedente and f.get("statut") != "cancelled"
@@ -275,11 +277,17 @@ def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, regl
     else:
         debut = ajouter_mois(date(aujourdhui.year, aujourdhui.month, 1), 1)
     prochaine = _d(bail.get("date_prochaine_revision"))
-    count, a_recalculer = None, False
+    loyer, revise_le, loyer_connu, periode_revisee = bail.get("loyer_attendu_annuel") or 0, _d(bail.get("date_derniere_revision")), True, False
+    count = None
     if prochaine and prochaine <= debut:
-        # la révision tombe avant le début proposé : la période visée est la suivante, dont le loyer
-        # dépend d'un indice que le classeur doit d'abord prendre en compte
-        prochaine, a_recalculer = ajouter_mois(prochaine, 12), True
+        # la période proposée commence à la date anniversaire ou après : c'est le loyer RÉVISÉ qui se facture.
+        # Il n'est connu que si l'indice est publié et pris en compte par le classeur d'indexation.
+        periode_revisee, revise_le = True, prochaine
+        loyer_connu = bail.get("loyer_prochain_annuel") is not None
+        loyer = bail.get("loyer_prochain_annuel") if loyer_connu else loyer
+        prochaine = _d(bail.get("date_revision_suivante")) or ajouter_mois(prochaine, 12)
+        if prochaine <= debut:                       # référentiel en retard de plus d'une période
+            loyer_connu, prochaine = False, ajouter_mois(debut, 12)
     if prochaine:
         count, d = 0, debut
         while d < prochaine:
@@ -292,7 +300,7 @@ def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, regl
     if count:
         regle["count"] = count
     lignes = [{"label": f"Loyer {ADJECTIF.get(periodicite, '')} – {bail.get('local', '')}", "quantity": 1, "unit": unite,
-               "raw_currency_unit_price": f"{(bail.get('loyer_attendu_annuel') or 0) / n:.2f}", "vat_rate": tva}]
+               "raw_currency_unit_price": f"{loyer / n:.2f}", "vat_rate": tva}]
     if (bail.get("charges_annuelles") or 0) > 0:
         lignes.append({"label": "Provision sur charges", "quantity": 1, "unit": unite,
                        "raw_currency_unit_price": f"{bail['charges_annuelles'] / n:.2f}", "vat_rate": tva})
@@ -307,8 +315,7 @@ def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, regl
         "customer_invoice_data": {
             "currency": "EUR", "language": "fr_FR", "pdf_invoice_subject": f"Loyer {bail.get('local', '')}",
             "special_mention": (f"Loyer indexé sur l'{bail.get('indice', '')}"
-                                + (f", révisé le {_fr(_d(bail.get('date_derniere_revision')))}"
-                                   if bail.get("date_derniere_revision") else "") + "."),
+                                + (f", révisé le {_fr(revise_le)}" if revise_le and loyer_connu else "") + "."),
             "invoice_lines": lignes,
         },
     }
@@ -316,9 +323,11 @@ def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, regl
     return {"corps": corps, "debut": debut.isoformat(), "occurrences": count,
             "derniere_occurrence": dernier.isoformat() if dernier else None,
             "envoyable": bail.get("customer_id") is not None,
-            "a_recalculer": a_recalculer,
-            "note": ("Une révision intervient avant ce début : mettre à jour le classeur d'indexation, le loyer "
-                     "ci-dessous est celui d'avant révision. Borné au " + _fr(prochaine)) if a_recalculer else
+            "loyer_connu": loyer_connu, "periode_revisee": periode_revisee, "loyer_annuel": loyer,
+            "note": ("Loyer révisé inconnu : l'indice de la révision du " + _fr(revise_le) + " n'est pas pris en compte "
+                     "par le classeur d'indexation. Le montant ci-dessous est l'ancien loyer") if not loyer_connu else
+                    ("Période au loyer révisé le " + _fr(revise_le) + ", bornée à la révision suivante du " + _fr(prochaine))
+                    if periode_revisee else
                     ("Borné à la prochaine révision du " + _fr(prochaine)) if count else
                     "Prochaine révision inconnue : abonnement non borné, à surveiller"}
 

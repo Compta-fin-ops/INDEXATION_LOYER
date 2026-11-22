@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block titre %}Envoi n° {{ e.id }} · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="fil"><a href="/envois">Journal des envois</a> / n° {{ e.id }}</div>
+<h1>Envoi n° {{ e.id }} <span class="pastille {{ {'créé': 'ok', 'refusé': 'a_traiter', 'incertain': 'bloquant'}.get(e.etat, 'neutre') }}">{{ e.etat | capitalize }}</span></h1>
+<p class="sous-titre">{{ nom }} · bail <a href="/baux/{{ e.bail_id }}">{{ e.bail_code }}</a> · {{ e.locataire }}</p>
+{% if e.etat == 'incertain' %}<div class="bandeau erreur">Issue incertaine : Pennylane n'a pas confirmé. L'abonnement a pu être créé. Vérifier dans Pennylane, puis actualiser la console : tout nouvel envoi pour ce bail est bloqué d'ici là.</div>{% endif %}
+{% if e.etat == 'refusé' %}<div class="bandeau">Envoi refusé : rien n'a été créé.</div>{% endif %}
+<div class="deux">
+  <div class="carte">
+    <h2>Résultat</h2>
+    <dl class="fiche">
+      <dt>Date</dt><dd>{{ e.horodatage[:10] | date_fr }} à {{ e.horodatage[11:19] }}</dd>
+      <dt>Canal</dt><dd>{{ 'Simulation, aucun appel à Pennylane' if e.mode == 'simulation' else 'Pennylane, API v2' }}</dd>
+      <dt>Réponse HTTP</dt><dd>{{ e.statut_http or '—' }}</dd>
+      <dt>Abonnement créé</dt><dd>{{ 'n° ' ~ e.subscription_id if e.subscription_id else '—' }}</dd>
+      <dt>Statut à la création</dt><dd>{{ STATUTS.get(e.statut_abonnement, e.statut_abonnement) or '—' }}</dd>
+      <dt>Clé d'unicité</dt><dd>{{ e.cle }}</dd>
+      <dt>Empreinte du corps</dt><dd>{{ e.empreinte[:16] }}…</dd>
+    </dl>
+    {% if e.etat == 'créé' %}<p class="petit" style="margin: 12px 0 0">À faire dans Pennylane : ouvrir l'abonnement, contrôler le client, le montant et les dates. Les factures naîtront en brouillon.</p>{% endif %}
+  </div>
+  <div class="carte"><h2>Réponse reçue</h2><pre>{{ e.reponse or '—' }}</pre></div>
+</div>
+<div class="carte"><h2>Corps envoyé</h2><pre>{{ e.corps }}</pre></div>
+{% endblock %}

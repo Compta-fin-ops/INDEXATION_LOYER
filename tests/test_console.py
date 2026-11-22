@@ -15,7 +15,8 @@ def _bail(**kw):
          "subscription_id": None, "indice": "ILC", "periodicite": "Mensuelle", "tva_pct": 20.0,
          "date_effet": "2022-04-01", "date_fin": "2031-04-01", "loyer_initial_annuel": 12000.0,
          "loyer_attendu_annuel": 12600.0, "charges_annuelles": 1200.0, "date_derniere_revision": "2026-04-01",
-         "date_prochaine_revision": "2027-04-01", "statut_revision": "✔ Calculable", "revisions_non_appliquees": 0}
+         "date_prochaine_revision": "2027-04-01", "loyer_prochain_annuel": None, "date_revision_suivante": None,
+         "statut_revision": "✔ Calculable", "revisions_non_appliquees": 0}
     return {**b, **kw}
 
 
@@ -62,7 +63,11 @@ def test_revision_non_repercutee_et_rappel():
 def test_proposition_quand_la_revision_precede_le_debut():
     b = _bail(date_derniere_revision="2025-12-01", date_prochaine_revision="2026-12-01")
     p = rp.proposer_abonnement(b, None, AUJ)                 # début proposé le 01/12/2026, jour de la révision
-    assert p["a_recalculer"] and p["occurrences"] == 12 and "mettre à jour le classeur" in p["note"]
+    assert p["periode_revisee"] and not p["loyer_connu"] and p["occurrences"] == 12 and "Loyer révisé inconnu" in p["note"]
+    connu = rp.proposer_abonnement({**b, "loyer_prochain_annuel": 12900.0}, None, AUJ)
+    assert connu["loyer_connu"] and connu["derniere_occurrence"] == "2027-11-01"
+    assert connu["corps"]["customer_invoice_data"]["invoice_lines"][0]["raw_currency_unit_price"] == "1075.00"
+    assert "révisé le 01/12/2026" in connu["corps"]["customer_invoice_data"]["special_mention"]
 
 
 def test_abonnement_non_borne():

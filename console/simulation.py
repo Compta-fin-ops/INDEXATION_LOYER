@@ -78,6 +78,10 @@ def generer(aujourdhui: date, graine: int = 2026) -> tuple[list[dict], dict[str,
                 "tva_pct": 20.0, "date_effet": effet, "date_fin": ajouter_mois(effet, 108),
                 "loyer_initial_annuel": initial, "loyer_attendu_annuel": attendu, "charges_annuelles": charges,
                 "date_derniere_revision": derniere if annees >= 1 else None, "date_prochaine_revision": prochaine,
+                # indice de la prochaine révision publié si elle est à moins de 4 mois, sauf un bail sur six
+                "loyer_prochain_annuel": round(attendu * 1.021, 2)
+                if (prochaine - aujourdhui).days <= 120 and id_client % 6 else None,
+                "date_revision_suivante": ajouter_mois(prochaine, 12),
                 "statut_revision": "✔ Calculable" if annees >= 1 else "À venir", "revisions_non_appliquees": 0,
             }
             echeance = round((attendu + charges) / n, 2)

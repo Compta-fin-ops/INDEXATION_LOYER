@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS baux (
     charges_annuelles REAL DEFAULT 0,
     date_derniere_revision TEXT,
     date_prochaine_revision TEXT,
+    loyer_prochain_annuel REAL,              -- loyer après la prochaine révision, si l'indice est publié
+    date_revision_suivante TEXT,             -- révision d'après : terme de la période suivante
     statut_revision TEXT DEFAULT '',         -- ✔ Calculable, ⚠ Indice attendu, ❄ Gelée, À venir…
     revisions_non_appliquees INTEGER DEFAULT 0,
     UNIQUE (dossier, code)
@@ -78,6 +80,24 @@ CREATE TABLE IF NOT EXISTS synchros (
     factures INTEGER DEFAULT 0,
     message TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS envois (                 -- journal des créations d'abonnement, jamais purgé
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    horodatage TEXT NOT NULL,
+    dossier TEXT NOT NULL,
+    bail_id INTEGER,
+    bail_code TEXT DEFAULT '',
+    locataire TEXT DEFAULT '',
+    cle TEXT NOT NULL,                               -- dossier|bail|date de début
+    empreinte TEXT NOT NULL,                         -- SHA-256 du corps envoyé
+    corps TEXT NOT NULL,
+    mode TEXT NOT NULL,                              -- simulation | pennylane
+    etat TEXT NOT NULL,                              -- en cours | créé | refusé | incertain
+    statut_http INTEGER,
+    subscription_id INTEGER,
+    statut_abonnement TEXT DEFAULT '',
+    reponse TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS ix_envois_cle ON envois(cle);
 CREATE INDEX IF NOT EXISTS ix_baux_dossier ON baux(dossier);
 CREATE INDEX IF NOT EXISTS ix_abo_client ON abonnements(dossier, customer_id);
 CREATE INDEX IF NOT EXISTS ix_fac_client ON factures(dossier, customer_id);
@@ -91,6 +111,11 @@ def connecter(chemin: Path | str = CHEMIN_DEFAUT) -> sqlite3.Connection:
     cx.row_factory = sqlite3.Row
     cx.execute("PRAGMA foreign_keys = ON")
     cx.executescript(SCHEMA)
+    colonnes = {r["name"] for r in cx.execute("PRAGMA table_info(baux)")}
+    for nom, type_ in (("loyer_prochain_annuel", "REAL"), ("date_revision_suivante", "TEXT")):
+        if nom not in colonnes:                      # base créée par une version antérieure
+            cx.execute(f"ALTER TABLE baux ADD COLUMN {nom} {type_}")
+    cx.commit()
     return cx
 
 

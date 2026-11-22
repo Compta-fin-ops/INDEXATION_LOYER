@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block titre %}Journal des envois · Console des loyers{% endblock %}
+{% block contenu %}
+<h1>Journal des envois</h1>
+<p class="sous-titre">Chaque tentative de création d'abonnement, réussie ou non, avec le corps exact envoyé. Le journal n'est jamais purgé.</p>
+<div class="carte"><div class="defile"><table>
+  <thead><tr><th>N°</th><th>Date</th><th>Dossier</th><th>Bail</th><th>Période</th><th>Canal</th><th>Issue</th><th>Abonnement</th></tr></thead>
+  <tbody>
+  {% for e in envois %}
+  <tr>
+    <td><a class="fort" href="/envois/{{ e.id }}">{{ e.id }}</a></td>
+    <td>{{ e.horodatage[:10] | date_fr }} {{ e.horodatage[11:16] }}</td>
+    <td><a href="/dossiers/{{ e.dossier }}">{{ noms.get(e.dossier, e.dossier) }}</a></td>
+    <td><a href="/baux/{{ e.bail_id }}">{{ e.bail_code }}</a> <span class="discret">{{ e.locataire }}</span></td>
+    <td>à partir du {{ e.cle.split('|')[-1] | date_fr }}</td>
+    <td>{{ 'Simulation' if e.mode == 'simulation' else 'Pennylane' }}</td>
+    <td><span class="pastille {{ {'créé': 'ok', 'refusé': 'a_traiter', 'incertain': 'bloquant'}.get(e.etat, 'neutre') }}">{{ e.etat | capitalize }}</span></td>
+    <td>{% if e.subscription_id %}n° {{ e.subscription_id }}{% else %}<span class="discret">—</span>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="8" class="discret">Aucun envoi.</td></tr>{% endfor %}
+  </tbody>
+</table></div></div>
+{% endblock %}

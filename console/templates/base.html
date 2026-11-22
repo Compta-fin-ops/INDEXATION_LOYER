@@ -13,6 +13,7 @@
     <a href="/" class="{{ 'actif' if page == 'bord' }}">Tableau de bord</a>
     <a href="/ecarts" class="{{ 'actif' if page == 'ecarts' }}">Écarts</a>
     <a href="/echeancier" class="{{ 'actif' if page == 'echeancier' }}">Échéancier</a>
+    <a href="/envois" class="{{ 'actif' if page == 'envois' }}">Journal des envois</a>
   </nav>
   <div class="entete-droite">
     <span>Situation au {{ aujourdhui | date_fr }}{% if derniere_synchro %} · collecte du {{ derniere_synchro[:10] | date_fr }} à {{ derniere_synchro[11:16] }}{% endif %}</span>
@@ -22,7 +23,7 @@
 <main>
 {% if simule %}<div class="bandeau">Données simulées : portefeuille fictif de démonstration, aucun appel à Pennylane.</div>{% endif %}
 {% block contenu %}{% endblock %}
-<footer>Console des loyers v{{ version }} · lecture seule de Pennylane · les propositions d'abonnement sont affichées, jamais envoyées.</footer>
+<footer>Console des loyers v{{ version }} · {% if simule %}mode simulation, aucun appel à Pennylane{% elif ecriture_activee %}écriture activée sur ce poste : création d'abonnements uniquement, factures en brouillon{% else %}lecture seule de Pennylane{% endif %} · la console ne modifie ni ne supprime jamais rien.</footer>
 </main>
 </body>
 </html>

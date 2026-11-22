@@ -16,6 +16,7 @@
       <dt>Indice</dt><dd>{{ sit.bail.indice }}</dd>
       <dt>Dernière révision</dt><dd>{{ sit.bail.date_derniere_revision | date_fr }} · {{ sit.bail.statut_revision }}</dd>
       <dt>Prochaine révision</dt><dd>{{ sit.bail.date_prochaine_revision | date_fr }}</dd>
+      <dt>Loyer après cette révision</dt><dd>{% if sit.bail.loyer_prochain_annuel is not none %}{{ sit.bail.loyer_prochain_annuel | eur2 }} par an{% else %}<span class="discret">inconnu, indice non publié</span>{% endif %}</dd>
       <dt>Terme du bail</dt><dd>{{ sit.bail.date_fin | date_fr }}</dd>
     </dl>
   </div>
@@ -46,7 +47,8 @@
   {% if sit.rappel and sit.rappel.echeances %}<p class="petit" style="margin: 8px 0 0"><span class="pastille a_traiter">Rappel de loyer</span> {{ sit.rappel.montant | eur2 }} HT à facturer séparément : {{ sit.rappel.echeances }} échéance(s) facturée(s) à l'ancien loyer depuis le {{ sit.rappel.depuis | date_fr }}, soit {{ sit.rappel.ecart_par_echeance | eur2 }} par échéance.</p>{% endif %}
   <pre>POST /api/external/v2/billing_subscriptions
 {{ corps }}</pre>
-  <p class="discret petit" style="margin: 10px 0 0">Aperçu seulement. La console n'envoie rien : les factures naîtraient en brouillon, à valider dans Pennylane.</p>
+  <p style="margin: 12px 0 0"><a class="bouton" href="/baux/{{ sit.bail.id }}/abonnement">Préparer la création dans Pennylane</a>
+  <span class="discret petit">Rien n'est envoyé à cette étape : la page suivante affiche les contrôles et demande une confirmation.</span></p>
 </div>
 {% endif %}
 <div class="carte">

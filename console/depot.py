@@ -11,7 +11,8 @@ from .pennylane_api import Client
 log = logging.getLogger(__name__)
 COLONNES_BAIL = ("code", "local", "locataire", "customer_id", "subscription_id", "indice", "periodicite", "tva_pct",
                  "date_effet", "date_fin", "loyer_initial_annuel", "loyer_attendu_annuel", "charges_annuelles",
-                 "date_derniere_revision", "date_prochaine_revision", "statut_revision", "revisions_non_appliquees")
+                 "date_derniere_revision", "date_prochaine_revision", "loyer_prochain_annuel", "date_revision_suivante",
+                 "statut_revision", "revisions_non_appliquees")
 
 
 def _iso(v):
@@ -69,6 +70,8 @@ def importer_classeur(cx: sqlite3.Connection, chemin: Path, code_dossier: str | 
             "charges_annuelles": b.charges_annuelles_ht,
             "date_derniere_revision": effectives[-1].echeance.date_revision if effectives else None,
             "date_prochaine_revision": a_venir[0].echeance.date_revision if a_venir else None,
+            "loyer_prochain_annuel": a_venir[0].loyer_retenu if a_venir else None,   # None tant que l'indice manque
+            "date_revision_suivante": a_venir[1].echeance.date_revision if len(a_venir) > 1 else None,
             "statut_revision": echues[-1].statut if echues else "À venir",
             "revisions_non_appliquees": sum(
                 1 for l in echues if l.statut == calcul.STATUT_CALCULABLE
