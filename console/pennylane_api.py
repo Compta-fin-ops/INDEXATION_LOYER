@@ -4,11 +4,11 @@ Deux sources interchangeables derrière la même interface :
   - ClientReel    : API Entreprise v2, un jeton par dossier, LECTURE SEULE ;
   - ClientSimule  : jeu de données fictif au même format (console/simulation.py).
 
-État de la vérification du client réel : la forme d'un abonnement est celle de l'OpenAPI
-« Create a billing subscription » fournie par le cabinet. La pagination des listes et les
-champs exacts d'une facture client N'ONT PAS été vérifiés (documentation inaccessible depuis
-l'environnement de développement) : les fonctions `normaliser_*` lisent plusieurs noms de
-champs plausibles et sont le seul endroit à corriger au premier essai réel.
+État de la vérification du client réel : la lecture des abonnements (pagination par curseur
+items / has_more / next_cursor, limite de 100, champs et valeurs nulles) est conforme à l'OpenAPI
+« List billing subscriptions » du 2026-05-27 fournie par le cabinet. Les champs d'une facture
+client N'ONT PAS été vérifiés : `normaliser_facture` lit plusieurs noms plausibles et reste le seul
+endroit à corriger au premier essai réel. Aucun appel réel n'a encore été exécuté.
 """
 from __future__ import annotations
 

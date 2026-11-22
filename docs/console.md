@@ -69,7 +69,9 @@ par échéance est le plus proche.
 | Import du référentiel depuis un classeur d'indexation | Testé sur le classeur de démonstration |
 | Pages web et API JSON | Testées |
 | Forme d'un abonnement lu dans Pennylane | Alignée sur l'OpenAPI « Create a billing subscription » fournie par le cabinet |
-| Pagination des listes et champs d'une facture client | **Non vérifiés** : documentation inaccessible depuis l'environnement de développement |
+| Lecture des abonnements : pagination par curseur, champs, valeurs nulles | Conforme à l'OpenAPI « List billing subscriptions » du 2026-05-27, fournie par le cabinet |
+| Champs d'une facture client | **Non vérifiés** : il manque l'OpenAPI « List customer invoices » |
+| Jeton cabinet | La doc indique qu'un jeton cabinet est accepté sur l'API v2 avec l'en-tête `X-Company-Id`. Non exploité : la console utilise un jeton par dossier |
 | Appel réel à Pennylane | **Jamais exécuté**, faute de jeton |
 
 Les deux points non vérifiés sont isolés dans `console/pennylane_api.py`, fonctions `normaliser_abonnement`,
