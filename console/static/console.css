@@ -119,3 +119,7 @@ tr.a-venir td { background: color-mix(in srgb, var(--fond) 60%, transparent); }
 .depot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
 .depot input[type=file] { flex: 1 1 220px; width: auto; padding: 5px 8px; }
 @media (max-width: 640px) { .formulaire label.large { grid-column: auto; } }
+.etroit { max-width: 460px; margin: 40px auto 0; }
+.formulaire.une { grid-template-columns: 1fr; }
+.decision.compte { grid-template-columns: 150px 120px minmax(190px, 1fr) auto; min-width: 600px; }
+.entete-droite form { margin: 0; }

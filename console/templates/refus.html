@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block titre %}Action non autorisée · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="etroit">
+  <h1>Action non autorisée</h1>
+  <div class="bandeau erreur">Votre compte a le rôle « {{ utilisateur.role }} ». Cette action demande le rôle « {{ requis }} ».</div>
+  <p>Rien n'a été modifié. Un administrateur peut changer votre rôle depuis la page « Comptes ».</p>
+  <p class="actions"><a class="bouton" href="/">Retour au tableau de bord</a></p>
+</div>
+{% endblock %}

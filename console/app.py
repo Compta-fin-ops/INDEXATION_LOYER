@@ -8,6 +8,7 @@ sur confirmation explicite, verrous levés (console/ecriture.py), et ne modifie 
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import sqlite3
@@ -24,7 +25,7 @@ from fastapi.templating import Jinja2Templates
 from indexation_loyer import calcul
 from indexation_loyer.baux import DECISIONS, INDICES, METHODES, PERIODICITES_FACTURATION, TYPES_BAIL, est_gel
 
-from . import __version__, db, depot, ecriture, pieces, rapprochement as rp, referentiel, simulation
+from . import __version__, comptes, db, depot, ecriture, pieces, rapprochement as rp, referentiel, simulation
 
 ICI = Path(__file__).resolve().parent
 STATUTS_ABONNEMENT = {"in_progress": "en cours", "not_started": "programmé", "finished": "terminé", "stopped": "arrêté",
@@ -54,6 +55,8 @@ def _date_fr(v) -> str:
 
 
 FICTIF = "portefeuille fictif"
+TEMOIN = "console_session"
+LIBRES = ("/connexion",)                     # seules pages servies sans session
 RE_VARIABLE_JETON = re.compile(r"^PENNYLANE_TOKEN_[A-Z0-9_]+$")
 
 
@@ -69,14 +72,53 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
     cx = db.connecter(chemin_db)
     jour = lambda: aujourdhui or date.today()
 
+    verrous: dict = {}
+
+    def role_requis(methode: str, chemin: str) -> str:
+        if chemin.startswith("/utilisateurs"):
+            return "administrateur"
+        if methode in ("GET", "HEAD", "OPTIONS") or chemin in ("/compte", "/deconnexion"):
+            return "lecture"
+        if chemin.endswith("/abonnement"):               # création d'un abonnement dans Pennylane
+            return "validation"
+        return "gestion"
+
+    def meme_origine(request: Request) -> bool:
+        """Un formulaire doit venir de la console elle-même : en-tête Origin, à défaut Referer, obligatoire."""
+        source = request.headers.get("origin") or request.headers.get("referer")
+        return bool(source) and urllib.parse.urlsplit(source).netloc == request.headers.get("host")
+
     @app.middleware("http")
-    async def meme_origine(request: Request, suite):
-        """Une page d'un autre site ne doit pas pouvoir poster un formulaire vers la console."""
-        if request.method not in ("GET", "HEAD", "OPTIONS"):
-            origine = request.headers.get("origin")
-            if origine and urllib.parse.urlsplit(origine).netloc != request.headers.get("host"):
-                return PlainTextResponse("Requête refusée : elle ne vient pas de la console.", status_code=403)
-        return await suite(request)
+    async def garde(request: Request, suite):
+        chemin, lecture = request.url.path, request.method in ("GET", "HEAD", "OPTIONS")
+        if chemin.startswith("/static/"):
+            return await suite(request)
+        if not lecture and not meme_origine(request):
+            return PlainTextResponse("Requête refusée : elle ne vient pas de la console.", status_code=403)
+        u = comptes.session(cx, request.cookies.get(TEMOIN))
+        request.state.utilisateur = u
+        if chemin not in LIBRES:
+            if u is None:
+                if lecture and not chemin.startswith("/api/"):
+                    cible = chemin + ("?" + request.url.query if request.url.query else "")
+                    return RedirectResponse("/connexion?" + urllib.parse.urlencode({"suite": cible}), status_code=303)
+                return PlainTextResponse("Session absente ou expirée : se reconnecter.", status_code=401)
+            if u["doit_changer"] and chemin not in ("/compte", "/deconnexion"):
+                return RedirectResponse("/compte", status_code=303)
+            requis = role_requis(request.method, chemin)
+            if not comptes.peut(u["role"], requis):
+                return gabarits.TemplateResponse(request, "refus.html", contexte(request, page="", requis=requis), status_code=403)
+        jeton_auteur = referentiel.auteur_courant.set(u["identifiant"] if u else "")
+        verrou = verrous.setdefault(asyncio.get_running_loop(), asyncio.Lock())
+        try:
+            async with verrou:                           # une requête à la fois sur la base : pas d'écritures entremêlées
+                reponse = await suite(request)
+        finally:
+            referentiel.auteur_courant.reset(jeton_auteur)
+        reponse.headers.setdefault("Cache-Control", "no-store")
+        reponse.headers.setdefault("X-Frame-Options", "DENY")
+        reponse.headers.setdefault("Referrer-Policy", "same-origin")
+        return reponse
 
     def analyses(code: str | None = None) -> list[dict]:
         return [rp.analyser_dossier(x["dossier"], x["baux"], x["abonnements"], x["factures"], jour())
@@ -101,6 +143,7 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         derniere = cx.execute("SELECT MAX(horodatage) AS h, MAX(source) AS s FROM synchros").fetchone()
         simule = est_simule()
         return {"request": request, "version": __version__, "aujourdhui": jour(), "TYPES": TYPES,
+                "utilisateur": getattr(request.state, "utilisateur", None), "ROLES": comptes.LIBELLES_ROLE,
                 "STATUTS": STATUTS_ABONNEMENT, "MODES": MODES, "ecriture_activee": ecriture.ecriture_activee(),
                 "GRAVITE": rp.LIBELLE_GRAVITE, "derniere_synchro": derniere["h"], "simule": simule, **kw}
 
@@ -120,6 +163,124 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
             "sous_facturation": round(sum(e.montant for e in ecarts
                                           if e.type in ("REVISION_NON_REPERCUTEE", "TERME_ECHU", "SANS_ABONNEMENT")), 2),
         }
+
+    # -------------------------------------------------------------------- comptes
+    def destination(suite: str) -> str:
+        return suite if suite.startswith("/") and not suite.startswith("//") and "\\" not in suite else "/"
+
+    def page_connexion(request: Request, suite: str = "/", erreur: str = "", statut: int = 200):
+        aucun = cx.execute("SELECT COUNT(*) AS n FROM utilisateurs").fetchone()["n"] == 0
+        return gabarits.TemplateResponse(request, "connexion.html", contexte(
+            request, page="", suite=destination(suite), erreur=erreur, aucun_compte=aucun), status_code=statut)
+
+    @app.get("/connexion", response_class=HTMLResponse)
+    def connexion(request: Request, suite: str = "/"):
+        if request.state.utilisateur:
+            return RedirectResponse(destination(suite), status_code=303)
+        return page_connexion(request, suite)
+
+    @app.post("/connexion")
+    async def se_connecter(request: Request):
+        champs = await formulaire(request)
+        u, erreur = comptes.authentifier(cx, champs.get("identifiant", ""), champs.get("mot_de_passe", ""))
+        if u is None:
+            return page_connexion(request, champs.get("suite", "/"), erreur, 401)
+        reponse = RedirectResponse(destination(champs.get("suite", "/")), status_code=303)
+        reponse.set_cookie(TEMOIN, comptes.ouvrir_session(cx, u["id"]), httponly=True, samesite="lax",
+                           secure=request.url.scheme == "https", max_age=int(comptes.DUREE_SESSION.total_seconds()), path="/")
+        return reponse
+
+    @app.post("/deconnexion")
+    def se_deconnecter(request: Request):
+        comptes.fermer_session(cx, request.cookies.get(TEMOIN))
+        reponse = RedirectResponse("/connexion", status_code=303)
+        reponse.delete_cookie(TEMOIN, path="/")
+        return reponse
+
+    @app.get("/compte", response_class=HTMLResponse)
+    def compte(request: Request, erreur: str = ""):
+        return gabarits.TemplateResponse(request, "compte.html", contexte(request, page="compte", erreur=erreur, message=""))
+
+    @app.post("/compte")
+    async def compte_mot_de_passe(request: Request):
+        u, champs = request.state.utilisateur, await formulaire(request)
+        erreur = ""
+        if comptes.authentifier(cx, u["identifiant"], champs.get("actuel", ""))[0] is None:
+            erreur = "Mot de passe actuel incorrect."
+        elif champs.get("nouveau", "") != champs.get("confirmation", ""):
+            erreur = "Les deux saisies du nouveau mot de passe diffèrent."
+        elif champs.get("nouveau", "") == champs.get("actuel", ""):
+            erreur = "Le nouveau mot de passe doit différer de l'actuel."
+        else:
+            try:
+                comptes.changer_mot_de_passe(cx, u["id"], champs.get("nouveau", ""))
+            except ValueError as exc:
+                erreur = str(exc)
+        if erreur:
+            return gabarits.TemplateResponse(request, "compte.html", contexte(request, page="compte", erreur=erreur, message=""),
+                                             status_code=400)
+        referentiel.tracer(cx, "Mot de passe changé", u["identifiant"])
+        cx.commit()
+        reponse = RedirectResponse("/", status_code=303)             # les autres sessions sont tombées : on en rouvre une
+        reponse.set_cookie(TEMOIN, comptes.ouvrir_session(cx, u["id"]), httponly=True, samesite="lax",
+                           secure=request.url.scheme == "https", max_age=int(comptes.DUREE_SESSION.total_seconds()), path="/")
+        return reponse
+
+    def page_utilisateurs(request: Request, erreur: str = "", message: str = "", statut: int = 200):
+        return gabarits.TemplateResponse(request, "utilisateurs.html", contexte(
+            request, page="utilisateurs", erreur=erreur, message=message, LONGUEUR_MIN=comptes.LONGUEUR_MIN,
+            comptes=[dict(r) for r in cx.execute("SELECT * FROM utilisateurs ORDER BY actif DESC, nom")],
+            journal=[dict(r) for r in cx.execute(
+                "SELECT * FROM historique WHERE action LIKE 'Compte%' OR action LIKE 'Mot de passe%' ORDER BY id DESC LIMIT 12")]),
+            status_code=statut)
+
+    @app.get("/utilisateurs", response_class=HTMLResponse)
+    def utilisateurs(request: Request):
+        return page_utilisateurs(request)
+
+    @app.post("/utilisateurs")
+    async def utilisateur_creer(request: Request):
+        c = await formulaire(request)
+        try:
+            comptes.creer(cx, c.get("identifiant", ""), c.get("nom", ""), c.get("role", "lecture"), c.get("mot_de_passe", ""),
+                          doit_changer=True)
+        except ValueError as exc:
+            return page_utilisateurs(request, erreur=str(exc), statut=400)
+        referentiel.tracer(cx, "Compte créé", f"{comptes.normaliser(c.get('identifiant', ''))} · rôle {c.get('role', 'lecture')}")
+        cx.commit()
+        return page_utilisateurs(request, message="Compte créé. Le mot de passe provisoire devra être changé à la première connexion.")
+
+    @app.post("/utilisateurs/{utilisateur_id}")
+    async def utilisateur_modifier(request: Request, utilisateur_id: int):
+        c = await formulaire(request)
+        cible = cx.execute("SELECT * FROM utilisateurs WHERE id=?", (utilisateur_id,)).fetchone()
+        if cible is None:
+            raise HTTPException(404, "Compte inconnu")
+        role, actif = c.get("role", cible["role"]), 1 if c.get("actif", "1") == "1" else 0
+        if role not in comptes.ROLES:
+            return page_utilisateurs(request, erreur="Rôle inconnu.", statut=400)
+        perd_admin = cible["role"] == "administrateur" and cible["actif"] and (role != "administrateur" or not actif)
+        if perd_admin and comptes.nb_administrateurs(cx, sauf=utilisateur_id) == 0:
+            return page_utilisateurs(request, erreur="Refusé : il doit rester au moins un administrateur actif.", statut=400)
+        faits = []
+        if c.get("mot_de_passe"):
+            try:
+                comptes.changer_mot_de_passe(cx, utilisateur_id, c["mot_de_passe"], doit_changer=True)
+            except ValueError as exc:
+                return page_utilisateurs(request, erreur=str(exc), statut=400)
+            faits.append("mot de passe provisoire réinitialisé")
+        if role != cible["role"]:
+            faits.append(f"rôle {cible['role']} → {role}")
+        if actif != cible["actif"]:
+            faits.append("réactivé" if actif else "désactivé")
+        cx.execute("UPDATE utilisateurs SET role=?, actif=?, nom=? WHERE id=?",
+                   (role, actif, c.get("nom", "").strip() or cible["nom"], utilisateur_id))
+        if not actif or role != cible["role"]:
+            cx.execute("DELETE FROM sessions WHERE utilisateur_id=?", (utilisateur_id,))    # effet immédiat
+        if faits:
+            referentiel.tracer(cx, "Compte modifié", f"{cible['identifiant']} · " + ", ".join(faits))
+        cx.commit()
+        return page_utilisateurs(request, message=f"{cible['identifiant']} : " + (", ".join(faits) or "aucun changement") + ".")
 
     @app.get("/", response_class=HTMLResponse)
     def tableau_de_bord(request: Request):

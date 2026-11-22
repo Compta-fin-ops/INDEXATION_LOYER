@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block titre %}Mon compte · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="etroit">
+  <h1>Mon compte</h1>
+  <p class="sous-titre">{{ utilisateur.nom }} · {{ utilisateur.identifiant }} · {{ ROLES[utilisateur.role] }}</p>
+  {% if utilisateur.doit_changer %}<div class="bandeau">Votre mot de passe est provisoire : choisissez le vôtre pour accéder à la console.</div>{% endif %}
+  {% if erreur %}<div class="bandeau erreur">{{ erreur }}</div>{% endif %}
+  <form method="post" action="/compte" class="carte">
+    <h2>Changer de mot de passe</h2>
+    <div class="formulaire une">
+      <label>Mot de passe actuel<input type="password" name="actuel" autocomplete="current-password" required></label>
+      <label>Nouveau mot de passe<input type="password" name="nouveau" autocomplete="new-password" required minlength="12"><span class="aide">12 caractères au moins. Une phrase de quelques mots convient très bien.</span></label>
+      <label>Nouveau mot de passe, une seconde fois<input type="password" name="confirmation" autocomplete="new-password" required minlength="12"></label>
+    </div>
+    <p class="actions"><button class="principal" type="submit">Enregistrer</button></p>
+    <p class="discret petit" style="margin: 10px 0 0">Vos autres sessions ouvertes seront fermées.</p>
+  </form>
+</div>
+{% endblock %}

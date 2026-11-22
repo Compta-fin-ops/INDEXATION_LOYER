@@ -4,7 +4,7 @@
 <h1>Journal des envois</h1>
 <p class="sous-titre">Chaque tentative de création d'abonnement, réussie ou non, avec le corps exact envoyé. Le journal n'est jamais purgé.</p>
 <div class="carte"><div class="defile"><table>
-  <thead><tr><th>N°</th><th>Date</th><th>Dossier</th><th>Bail</th><th>Période</th><th>Canal</th><th>Issue</th><th>Abonnement</th></tr></thead>
+  <thead><tr><th>N°</th><th>Date</th><th>Dossier</th><th>Bail</th><th>Période</th><th>Canal</th><th>Issue</th><th>Abonnement</th><th>Par</th></tr></thead>
   <tbody>
   {% for e in envois %}
   <tr>
@@ -16,8 +16,9 @@
     <td>{{ 'Simulation' if e.mode == 'simulation' else 'Pennylane' }}</td>
     <td><span class="pastille {{ {'créé': 'ok', 'refusé': 'a_traiter', 'incertain': 'bloquant'}.get(e.etat, 'neutre') }}">{{ e.etat | capitalize }}</span></td>
     <td>{% if e.subscription_id %}n° {{ e.subscription_id }}{% else %}<span class="discret">—</span>{% endif %}</td>
+    <td class="discret">{{ e.auteur or '—' }}</td>
   </tr>
-  {% else %}<tr><td colspan="8" class="discret">Aucun envoi.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="9" class="discret">Aucun envoi.</td></tr>{% endfor %}
   </tbody>
 </table></div></div>
 {% endblock %}

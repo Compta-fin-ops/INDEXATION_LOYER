@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block titre %}Connexion · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="etroit">
+  <h1>Connexion</h1>
+  <p class="sous-titre">Console des loyers du cabinet.</p>
+  {% if erreur %}<div class="bandeau erreur">{{ erreur }}</div>{% endif %}
+  {% if aucun_compte %}<div class="bandeau">Aucun compte n'existe encore. Le premier se crée sur le poste qui fait tourner la console, avec la commande <code>python -m console utilisateur creer</code>.</div>{% endif %}
+  <form method="post" action="/connexion" class="carte">
+    <input type="hidden" name="suite" value="{{ suite }}">
+    <div class="formulaire une">
+      <label>Identifiant<input name="identifiant" autocomplete="username" autofocus required></label>
+      <label>Mot de passe<input type="password" name="mot_de_passe" autocomplete="current-password" required></label>
+    </div>
+    <p class="actions"><button class="principal" type="submit">Se connecter</button></p>
+  </form>
+  <p class="discret petit">Mot de passe oublié : un administrateur en attribue un provisoire depuis la page « Comptes ».</p>
+</div>
+{% endblock %}

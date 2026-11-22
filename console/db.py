@@ -142,7 +142,27 @@ CREATE TABLE IF NOT EXISTS envois (                 -- journal des créations d'
     statut_http INTEGER,
     subscription_id INTEGER,
     statut_abonnement TEXT DEFAULT '',
-    reponse TEXT DEFAULT ''
+    reponse TEXT DEFAULT '',
+    auteur TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS utilisateurs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    identifiant TEXT NOT NULL UNIQUE,
+    nom TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'lecture',            -- lecture | gestion | validation | administrateur
+    mot_de_passe TEXT NOT NULL,                      -- empreinte scrypt salée, jamais le mot de passe
+    doit_changer INTEGER DEFAULT 0,                  -- mot de passe provisoire, à changer à la connexion
+    actif INTEGER DEFAULT 1,
+    echecs INTEGER DEFAULT 0,
+    bloque_jusqu TEXT,
+    cree_le TEXT,
+    derniere_connexion TEXT
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    empreinte TEXT PRIMARY KEY,                      -- SHA-256 du jeton de session, jamais le jeton
+    utilisateur_id INTEGER NOT NULL REFERENCES utilisateurs(id) ON DELETE CASCADE,
+    cree_le TEXT NOT NULL,
+    expire_le TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_envois_cle ON envois(cle);
 CREATE INDEX IF NOT EXISTS ix_pieces_bail ON pieces(bail_id);
@@ -161,6 +181,7 @@ MIGRATIONS = {
              ("trimestre_base", "TEXT DEFAULT ''"), ("periodicite_revision_ans", "INTEGER DEFAULT 1"),
              ("methode", "TEXT DEFAULT 'Chaînée'"), ("plafond_annuel_pct", "REAL"), ("duree_ans", "INTEGER"),
              ("date_sortie", "TEXT"), ("notes", "TEXT DEFAULT ''")),
+    "envois": (("auteur", "TEXT DEFAULT ''"),),
 }
 
 

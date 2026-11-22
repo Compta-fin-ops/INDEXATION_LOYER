@@ -27,6 +27,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+from . import referentiel
 from .pennylane_api import BASE_V2
 from .rapprochement import INTERVALLE_MOIS, SituationBail, _d, _eur, _fr
 
@@ -160,11 +161,11 @@ def journal(cx: sqlite3.Connection, dossier: str | None = None) -> list[dict]:
 
 def ouvrir_envoi(cx: sqlite3.Connection, bail: dict, proposition: dict, corps: dict, mode: str) -> int:
     """Journalise la tentative AVANT l'appel : un envoi dont la réponse se perd laisse une trace."""
-    cur = cx.execute("""INSERT INTO envois (horodatage, dossier, bail_id, bail_code, locataire, cle, empreinte, corps, mode, etat)
-                        VALUES (?,?,?,?,?,?,?,?,?, 'en cours')""",
+    cur = cx.execute("""INSERT INTO envois (horodatage, dossier, bail_id, bail_code, locataire, cle, empreinte, corps, mode, etat, auteur)
+                        VALUES (?,?,?,?,?,?,?,?,?, 'en cours', ?)""",
                      (datetime.now().isoformat(timespec="seconds"), bail["dossier"], bail["id"], bail["code"],
                       bail.get("locataire", ""), cle_idempotence(bail["dossier"], bail["code"], proposition["debut"]),
-                      empreinte(corps), json.dumps(corps, ensure_ascii=False, indent=2), mode))
+                      empreinte(corps), json.dumps(corps, ensure_ascii=False, indent=2), mode, referentiel.utilisateur()))
     cx.commit()
     return cur.lastrowid
 

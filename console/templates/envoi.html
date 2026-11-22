@@ -3,7 +3,7 @@
 {% block contenu %}
 <div class="fil"><a href="/envois">Journal des envois</a> / n° {{ e.id }}</div>
 <h1>Envoi n° {{ e.id }} <span class="pastille {{ {'créé': 'ok', 'refusé': 'a_traiter', 'incertain': 'bloquant'}.get(e.etat, 'neutre') }}">{{ e.etat | capitalize }}</span></h1>
-<p class="sous-titre">{{ nom }} · bail <a href="/baux/{{ e.bail_id }}">{{ e.bail_code }}</a> · {{ e.locataire }}</p>
+<p class="sous-titre">{{ nom }} · bail <a href="/baux/{{ e.bail_id }}">{{ e.bail_code }}</a> · {{ e.locataire }}{% if e.auteur %} · envoi déclenché par {{ e.auteur }}{% endif %}</p>
 {% if e.etat == 'incertain' %}<div class="bandeau erreur">Issue incertaine : Pennylane n'a pas confirmé. L'abonnement a pu être créé. Vérifier dans Pennylane, puis actualiser la console : tout nouvel envoi pour ce bail est bloqué d'ici là.</div>{% endif %}
 {% if e.etat == 'refusé' %}<div class="bandeau">Envoi refusé : rien n'a été créé.</div>{% endif %}
 <div class="deux">

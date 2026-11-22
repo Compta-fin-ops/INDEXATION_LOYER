@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from contextvars import ContextVar
 from datetime import date, datetime
 from pathlib import Path
 
@@ -40,9 +41,12 @@ LIBELLES = {
 _cache_indices: dict = {}
 
 
+auteur_courant: ContextVar[str] = ContextVar("auteur_courant", default="")
+
+
 def utilisateur() -> str:
-    """Auteur porté à l'historique. Sans comptes utilisateurs, c'est le poste qui fait tourner la console."""
-    return os.environ.get("CONSOLE_UTILISATEUR", "").strip() or "poste local"
+    """Auteur porté à l'historique : le compte connecté ; en ligne de commande, le poste."""
+    return auteur_courant.get() or os.environ.get("CONSOLE_UTILISATEUR", "").strip() or "poste local"
 
 
 def lire_indices(chemin: Path | None = None) -> list[insee.Observation]:

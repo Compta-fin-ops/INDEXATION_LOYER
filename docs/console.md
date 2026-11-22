@@ -81,9 +81,12 @@ le nombre d'occurrences de la période suivante, et affiche le corps de l'abonne
 
 ```bash
 pip install -r requirements.txt
-python -m console demo        # portefeuille fictif : 10 sociétés, 78 baux, anomalies réalistes
-python -m console serve       # http://127.0.0.1:8000
+python -m console demo                 # portefeuille fictif : 10 sociétés, 78 baux, anomalies réalistes
+python -m console utilisateur creer    # premier compte, administrateur
+python -m console serve                # http://127.0.0.1:8000
 ```
+
+Sur Windows, sans ligne de commande : double-clic sur `lancer_console.bat`, voir [installation.md](installation.md).
 
 ## Passer aux dossiers réels
 
@@ -112,6 +115,8 @@ par échéance est le plus proche.
 | Règles de rapprochement, rappel de loyer, proposition d'abonnement | Testées |
 | Verrous de la création d'abonnement, réponse perdue, refus de Pennylane | Testés contre un faux Pennylane, 9 tests |
 | Saisie d'un bail, calcul, gel, courrier PDF, pièces jointes, historique, sauvegarde | Testés, 11 tests |
+| Comptes, rôles, session, blocage après échecs, mot de passe provisoire | Testés, 7 tests, et parcours vérifié dans un navigateur |
+| Lanceur `lancer_console.bat` et notice Windows | **Non essayés sur Windows** |
 | Reprise d'un ancien classeur | Testée : la console retrouve les loyers du classeur de démonstration |
 | Pages web et API JSON | Testées |
 | Forme d'un abonnement lu dans Pennylane | Alignée sur l'OpenAPI « Create a billing subscription » fournie par le cabinet |
@@ -165,18 +170,45 @@ export PENNYLANE_TOKEN_ESSAI_ECRITURE=…               # jeton limité à billi
 export CONSOLE_ECRITURE=oui
 ```
 
+## Comptes et connexion
+
+Chaque personne a un compte : identifiant et mot de passe. Rien n'est servi sans session, hormis la page de
+connexion. Installation pas à pas sur un poste Windows : [installation.md](installation.md).
+
+| Rôle | Ce qu'il permet |
+|---|---|
+| Lecture | Consulter tout, ne rien modifier |
+| Gestion | Saisir les baux, geler une révision, joindre des pièces, éditer les courriers, relancer la collecte |
+| Validation | Gestion, plus la création d'abonnements dans Pennylane |
+| Administrateur | Validation, plus la gestion des comptes |
+
+```bash
+python -m console utilisateur creer                      # le premier compte est administrateur
+python -m console utilisateur lister
+python -m console utilisateur mot-de-passe IDENTIFIANT   # secours si le seul administrateur a oublié le sien
+```
+
+Les autres comptes se créent dans la console, page « Comptes », avec un mot de passe provisoire à changer à la
+première connexion. Un compte ne se supprime pas, il se désactive : l'historique garde son nom.
+
 ## Sécurité
 
-- Les jetons ne sont ni dans la base ni dans le dépôt : la base ne retient que le nom des variables
-  d'environnement. Le formulaire de dossier refuse toute valeur qui n'a pas la forme `PENNYLANE_TOKEN_CODE`,
-  pour qu'un jeton collé par erreur ne soit ni enregistré ni réaffiché.
-- **La console n'a pas encore de comptes utilisateurs.** Elle écoute sur `127.0.0.1` et ne doit pas être exposée
-  en l'état : quiconque atteint la page peut modifier un bail, et déclencher une création si l'écriture est
-  activée. L'historique porte « poste local », ou la valeur de `CONSOLE_UTILISATEUR`, faute d'identité.
-- Un formulaire posté depuis un autre site est refusé (contrôle de l'en-tête `Origin`).
-- Une pièce jointe est acceptée si son extension et son contenu concordent (PDF, PNG, JPEG, Word), 25 Mo au
-  plus. Elle est rangée sous son empreinte, jamais sous le nom fourni, et servie en téléchargement.
-- La base et les pièces contiennent des données de dossiers : elles sont exclues du dépôt.
+| Sujet | Ce qui est en place |
+|---|---|
+| Mots de passe | 12 caractères au moins. La base ne garde qu'une empreinte scrypt salée, jamais le mot de passe |
+| Essais répétés | Compte bloqué 15 minutes après 5 échecs. Le message ne dit pas si c'est l'identifiant ou le mot de passe qui est faux |
+| Session | 12 heures. Témoin inaccessible aux scripts de la page ; la base ne garde que l'empreinte du jeton |
+| Changement de rôle, désactivation, nouveau mot de passe | Les sessions du compte sont fermées à l'instant |
+| Formulaire posté depuis un autre site | Refusé : l'en-tête `Origin`, à défaut `Referer`, doit désigner la console |
+| Traçabilité | L'historique des baux et le journal des envois portent l'identifiant de l'auteur |
+| Écritures simultanées | Une requête à la fois sur la base |
+| Jetons Pennylane | Ni dans la base ni dans le dépôt : la base ne retient que le nom des variables d'environnement. Le formulaire de dossier refuse toute valeur qui n'a pas la forme `PENNYLANE_TOKEN_CODE` |
+| Pièces jointes | Extension et contenu concordants (PDF, PNG, JPEG, Word), 25 Mo au plus, rangées sous leur empreinte, servies en téléchargement |
+| Données | La base et les pièces sont exclues du dépôt |
+
+**Ce qui manque encore pour ouvrir la console à d'autres postes.** Elle écoute sur `127.0.0.1`. Sans connexion
+chiffrée (HTTPS), un mot de passe circulerait en clair sur le réseau : l'ouverture au réseau du cabinet ou à
+Internet demande un serveur placé derrière un accès chiffré. Il n'y a pas non plus de double authentification.
 
 ## Limites connues
 
@@ -191,10 +223,11 @@ export CONSOLE_ECRITURE=oui
 
 ## Suite envisagée
 
-1. Comptes utilisateurs, rôles et session, préalable à tout accès de l'équipe hors du poste.
-2. Essai réel en lecture sur un dossier.
-3. File « à valider » : dès que l'indice d'une révision est publié, abonnement de la période et courrier préparés.
-4. Première création réelle sur un dossier d'essai, pour constater le statut de l'abonnement créé.
+1. Essai réel en lecture sur un dossier.
+2. File « à valider » : dès que l'indice d'une révision est publié, abonnement de la période et courrier préparés.
+3. Première création réelle sur un dossier d'essai, pour constater le statut de l'abonnement créé.
+4. Hébergement avec accès chiffré, pour un usage depuis les autres postes ; connexion par le compte Microsoft
+   du cabinet en complément du mot de passe.
 5. Période provisoire à l'ancien loyer quand l'indice tarde, avec rappel à la publication.
-6. Hébergement, base serveur, collecte planifiée chaque nuit et courriel des écarts bloquants.
+6. Collecte planifiée chaque nuit et courriel des écarts bloquants.
 7. Mandats de prélèvement : à instruire sur la documentation de Pennylane, rien n'est vérifié à ce jour.

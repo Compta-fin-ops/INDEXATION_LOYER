@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from console import db, depot, pennylane_api, pieces, rapprochement as rp, referentiel, simulation
 from console.app import creer_app
+from tests.outils import client_connecte
 from indexation_loyer import insee
 
 AUJ = date(2026, 11, 22)
@@ -28,7 +29,7 @@ def indices(tmp_path):
 @pytest.fixture
 def console(tmp_path, indices):
     app = creer_app(tmp_path / "base.sqlite", AUJ, chemin_indices=indices, stockage=tmp_path / "pieces")
-    c = TestClient(app)
+    c = client_connecte(app, tmp_path / "base.sqlite")
     r = c.post("/dossiers", data={"code": "halles", "nom": "SCI des Halles", "siren": "123 456 789", "adresse": "1 place du Marché\n37000 Tours",
                                   "signataire": "A. Bailleur", "variable_jeton": "PENNYLANE_TOKEN_HALLES"}, follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/dossiers/HALLES"
@@ -129,7 +130,7 @@ def test_saisies_refusees(console):
     assert cx.execute("SELECT COUNT(*) AS n FROM dossiers").fetchone()["n"] == 1
     assert c.post("/dossiers/HALLES", data={"nom": "SCI des Halles", "variable_jeton": "abcdef"}).status_code == 400
     # un formulaire posté depuis un autre site est refusé
-    r = c.post(f"/baux/{bail_id}/revisions/3", data={"decision": "Geler – sans rattrapage"}, headers={"origin": "https://exemple.org"})
+    r = c.post(f"/baux/{bail_id}/revisions/3", data={"decision": "Geler – sans rattrapage"}, headers={"origin": "https://exemple.org"})   # remplace l'en-tête du client
     assert r.status_code == 403 and cx.execute("SELECT COUNT(*) AS n FROM decisions").fetchone()["n"] == 0
 
 

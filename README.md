@@ -53,7 +53,8 @@ Application web où vivent désormais les baux : saisie du bail, calcul des rév
 relevés, gel avec commentaire, courrier PDF au locataire, pièces jointes, historique. Elle compare, sur tous les
 dossiers, le loyer attendu et la facturation Pennylane, et fait remonter les écarts. Le classeur Excel décrit
 ci-dessus reste disponible, et se reprend dans la console par `python -m console importer`.
-Démonstration sur un portefeuille fictif : `python -m console demo` puis `python -m console serve`.
+Accès par compte et mot de passe, avec quatre rôles. Installation sur un poste Windows :
+[docs/installation.md](docs/installation.md), ou double-clic sur `lancer_console.bat`.
 Documentation : [docs/console.md](docs/console.md).
 
 ## Installation et premier usage

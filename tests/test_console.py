@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from console import db, depot, pennylane_api, rapprochement as rp, simulation
 from console.app import creer_app
+from tests.outils import client_connecte
 
 AUJ = date(2026, 11, 22)
 
@@ -175,7 +176,7 @@ def test_simulation_deterministe_et_coherente(base_demo):
 
 
 def test_pages_et_api(base_demo):
-    c = TestClient(creer_app(base_demo, AUJ))
+    c = client_connecte(creer_app(base_demo, AUJ), base_demo)
     accueil = c.get("/")
     assert accueil.status_code == 200 and "Données simulées" in accueil.text and "SCI du Parc" in accueil.text
     for url in ("/ecarts", "/ecarts?gravite=bloquant&dossier=PARC", "/echeancier?horizon=365", "/dossiers/PARC"):

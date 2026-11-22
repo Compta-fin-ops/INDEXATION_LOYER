@@ -1,0 +1,2 @@
+# le lanceur Windows garde ses fins de ligne CRLF, y compris dans le ZIP téléchargé
+*.bat -text

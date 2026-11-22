@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from console import db, depot, ecriture, rapprochement as rp, simulation
 from console.app import creer_app
+from tests.outils import client_connecte
 from tests.test_console import AUJ, _abo, _bail, _facture
 
 
@@ -96,7 +97,7 @@ def console_simulee(tmp_path):
     chemin = tmp_path / "demo.sqlite"
     cx = db.connecter(chemin)
     simulation.charger_demo(cx, AUJ)
-    return cx, TestClient(creer_app(chemin, AUJ))
+    return cx, client_connecte(creer_app(chemin, AUJ), chemin)
 
 
 def _formulaire(page: str, confirmation: str) -> str:
@@ -171,7 +172,7 @@ def console_reelle(tmp_path, monkeypatch):
     depot.enregistrer_dossier(cx, "HALLES", "SCI des Halles", variable_jeton="PENNYLANE_TOKEN_HALLES", source="classeur.xlsx")
     depot.enregistrer_baux(cx, "HALLES", [_bail(code="B01")])
     monkeypatch.setenv("PENNYLANE_TOKEN_HALLES", "jeton-lecture")
-    return cx, TestClient(creer_app(chemin, AUJ)), {"content-type": "application/x-www-form-urlencoded"}
+    return cx, client_connecte(creer_app(chemin, AUJ), chemin), {"content-type": "application/x-www-form-urlencoded"}
 
 
 def test_mode_reel_sans_activation_aucune_ecriture(console_reelle, monkeypatch):

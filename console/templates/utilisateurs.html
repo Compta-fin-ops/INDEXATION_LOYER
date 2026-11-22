@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block titre %}Comptes · Console des loyers{% endblock %}
+{% block contenu %}
+<h1>Comptes</h1>
+<p class="sous-titre">Un compte par personne. Les mots de passe ne sont pas lisibles, pas même ici : un oubli se règle par un mot de passe provisoire.</p>
+{% if erreur %}<div class="bandeau erreur">{{ erreur }}</div>{% endif %}
+{% if message %}<div class="bandeau succes">{{ message }}</div>{% endif %}
+<div class="carte">
+  <h2>Comptes existants</h2>
+  <div class="defile"><table class="revisions">
+    <thead><tr><th>Nom</th><th>Identifiant</th><th>Dernière connexion</th><th>Rôle, état, mot de passe provisoire</th></tr></thead>
+    <tbody>
+    {% for c in comptes %}
+    <tr class="{{ 'a-venir' if not c.actif }}">
+      <td class="fort">{{ c.nom }}{% if c.id == utilisateur.id %} <span class="pastille neutre">vous</span>{% endif %}</td>
+      <td>{{ c.identifiant }}{% if c.doit_changer %}<div class="discret petit">mot de passe provisoire</div>{% endif %}</td>
+      <td>{% if c.derniere_connexion %}{{ c.derniere_connexion[:10] | date_fr }} {{ c.derniere_connexion[11:16] }}{% else %}<span class="discret">jamais</span>{% endif %}</td>
+      <td><form method="post" action="/utilisateurs/{{ c.id }}" class="decision compte">
+        <input type="hidden" name="nom" value="{{ c.nom }}">
+        <select name="role" aria-label="Rôle">{% for r in ROLES %}<option value="{{ r }}"{{ ' selected' if c.role == r }}>{{ r | capitalize }}</option>{% endfor %}</select>
+        <select name="actif" aria-label="État"><option value="1"{{ ' selected' if c.actif }}>Actif</option><option value="0"{{ ' selected' if not c.actif }}>Désactivé</option></select>
+        <input type="password" name="mot_de_passe" placeholder="Nouveau mot de passe provisoire" autocomplete="new-password" aria-label="Nouveau mot de passe provisoire">
+        <button type="submit">Enregistrer</button></form></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="discret petit" style="margin: 10px 0 0">Désactiver un compte ou changer son rôle ferme ses sessions à l'instant. Un compte ne se supprime pas : l'historique garde son nom.</p>
+</div>
+<div class="deux">
+  <form method="post" action="/utilisateurs" class="carte">
+    <h2>Nouveau compte</h2>
+    <div class="formulaire une">
+      <label>Nom affiché<input name="nom" required></label>
+      <label>Identifiant<input name="identifiant" required autocomplete="off"><span class="aide">Sans espace, par exemple prenom.nom.</span></label>
+      <label>Rôle<select name="role">{% for r, l in ROLES.items() %}<option value="{{ r }}">{{ l }}</option>{% endfor %}</select></label>
+      <label>Mot de passe provisoire<input type="password" name="mot_de_passe" required minlength="{{ LONGUEUR_MIN }}" autocomplete="new-password"><span class="aide">{{ LONGUEUR_MIN }} caractères au moins. À transmettre de vive voix ; il devra être changé à la première connexion.</span></label>
+    </div>
+    <p class="actions"><button class="principal" type="submit">Créer le compte</button></p>
+  </form>
+  <div class="carte">
+    <h2>Les rôles</h2>
+    <ul class="liste">{% for r, l in ROLES.items() %}<li><span>{{ l }}</span></li>{% endfor %}</ul>
+    <h2 style="margin-top: 18px">Derniers événements</h2>
+    <ul class="liste">
+    {% for h in journal %}<li><span><span class="fort">{{ h.action }}</span><div class="discret petit">{{ h.detail }}</div></span><span class="discret petit">{{ h.horodatage[:10] | date_fr }} · {{ h.auteur }}</span></li>
+    {% else %}<li><span class="discret">Aucun.</span></li>{% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}
