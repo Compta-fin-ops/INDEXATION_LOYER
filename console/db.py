@@ -145,6 +145,15 @@ CREATE TABLE IF NOT EXISTS envois (                 -- journal des créations d'
     reponse TEXT DEFAULT '',
     auteur TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS imports (               -- fichier analysé, en attente de confirmation
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    horodatage TEXT NOT NULL,
+    auteur TEXT DEFAULT '',
+    nom_fichier TEXT NOT NULL,
+    empreinte TEXT NOT NULL,                         -- SHA-256 du fichier déposé
+    lignes TEXT NOT NULL,                            -- lignes lues, en JSON
+    etat TEXT NOT NULL DEFAULT 'analysé'             -- analysé | importé
+);
 CREATE TABLE IF NOT EXISTS utilisateurs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     identifiant TEXT NOT NULL UNIQUE,

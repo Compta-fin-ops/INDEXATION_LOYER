@@ -241,3 +241,79 @@ def test_tva_des_departements_d_outre_mer_et_taux_inconnu(console, indices):
     controles = ecriture.controler(sit, inconnu, {"code": "HALLES", "variable_jeton": ""}, [], AUJ, simulation=True)
     assert not ecriture.envoi_possible(controles)
     assert any(x.libelle == "Taux de TVA reconnu" and not x.ok for x in controles)
+
+
+def _bail_de(cx, dossier, bail_id, indices):
+    return next(b for b in depot.charger(cx, dossier, AUJ, indices)[0]["baux"] if b["id"] == bail_id)
+
+
+def _classeur(lignes):
+    """Le modèle de la console, feuille « Baux » remplie avec les lignes données (dictionnaires par titre de colonne)."""
+    import io
+    import openpyxl
+    from console import import_tableur
+    wb = openpyxl.load_workbook(io.BytesIO(import_tableur.modele_xlsx()))
+    titres = [c.value for c in wb["Baux"][1]]
+    for l in lignes:
+        wb["Baux"].append([l.get(t) for t in titres])
+    tampon = io.BytesIO()
+    wb.save(tampon)
+    return tampon.getvalue()
+
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+LIGNE = {"Code dossier": "PARC", "Raison sociale": "SCI du Parc", "SIREN": "987654321", "Locataire": "Pharmacie du Parc",
+         "Local": "3 avenue du Parc", "Prise d'effet": date(2023, 4, 1), "Loyer initial annuel HT": 24000, "TVA (%)": 8.5,
+         "Indice": "ILC", "Trimestre de départ": "2022-T4"}
+
+
+def test_import_en_lot_apercu_puis_confirmation(console, indices):
+    c, cx, bail_id, _ = console
+    assert c.get("/import").status_code == 200 and c.get("/import/modele.xlsx").content.startswith(b"PK")
+    fichier = _classeur([LIGNE, {**LIGNE, "Locataire": "Opticien", "Loyer initial annuel HT": 12000, "Facturation": "Trimestrielle"},
+                         {"Code dossier": "HALLES", "Code bail": "B01", "Locataire": "Déjà là", "Local": "x",
+                          "Prise d'effet": date(2020, 1, 1), "Loyer initial annuel HT": 1},                    # bail existant : ignoré
+                         {"Code dossier": "HALLES", "Locataire": "Fleuriste", "Local": "14 rue des Halles",
+                          "Prise d'effet": "01/04/2023", "Loyer initial annuel HT": "9 600,50", "Trimestre de départ": "2022-T4"}])
+    r = c.post("/import", files={"fichier": ("portefeuille.xlsx", fichier, XLSX)}, follow_redirects=False)
+    assert r.status_code == 303
+    apercu = c.get(r.headers["location"]).text
+    assert cx.execute("SELECT COUNT(*) AS n FROM baux").fetchone()["n"] == 1          # l'analyse ne crée rien
+    assert "26\u202f140,11" in apercu and "Déjà présent" in apercu and "Créer 3 bail/baux et 1 société(s)" in apercu
+    empreinte = cx.execute("SELECT empreinte FROM imports").fetchone()["empreinte"]
+    assert c.post(r.headers["location"], data={"empreinte": "autre", "nb": "3"}).status_code == 409
+    assert c.post(r.headers["location"], data={"empreinte": empreinte, "nb": "3"}, follow_redirects=False).status_code == 303
+    baux = {(b["dossier"], b["code"]): dict(b) for b in cx.execute("SELECT * FROM baux")}
+    assert set(baux) == {("HALLES", "B01"), ("HALLES", "B02"), ("PARC", "B01"), ("PARC", "B02")}
+    assert baux[("HALLES", "B01")]["locataire"] == "Boulangerie Martin"                # l'existant n'est pas touché
+    assert baux[("PARC", "B01")]["tva_pct"] == 8.5 and baux[("PARC", "B02")]["periodicite"] == "Trimestrielle"
+    assert baux[("HALLES", "B02")]["loyer_initial_annuel"] == 9600.5 and baux[("HALLES", "B02")]["calcule"] == 1
+    assert cx.execute("SELECT nom, siren FROM dossiers WHERE code='PARC'").fetchone()["siren"] == "987654321"
+    pharmacie = next(b["id"] for b in baux.values() if b["locataire"] == "Pharmacie du Parc")
+    assert _bail_de(cx, "PARC", pharmacie, indices)["loyer_attendu_annuel"] == pytest.approx(26140.11, abs=0.01)
+    assert c.post(r.headers["location"], data={"empreinte": empreinte, "nb": "0"}).status_code == 409   # jamais deux fois
+    assert cx.execute("SELECT COUNT(*) AS n FROM baux").fetchone()["n"] == 4
+    assert cx.execute("SELECT auteur FROM historique WHERE action='Import en lot'").fetchone()["auteur"] == "test.administrateur"
+
+
+def test_import_tout_ou_rien_et_fichiers_refuses(console):
+    c, cx, bail_id, _ = console
+    fichier = _classeur([LIGNE, {**LIGNE, "Locataire": "", "Loyer initial annuel HT": "abc", "TVA (%)": 7},
+                         {**LIGNE, "Code bail": "B07"}, {**LIGNE, "Code bail": "B07"}])
+    r = c.post("/import", files={"fichier": ("erreurs.xlsx", fichier, XLSX)}, follow_redirects=False)
+    apercu = c.get(r.headers["location"]).text
+    assert "2 ligne(s) en erreur" in apercu and "pas un nombre" in apercu and "en double dans le fichier" in apercu
+    assert "Confirmer" not in apercu
+    empreinte = cx.execute("SELECT empreinte FROM imports").fetchone()["empreinte"]
+    assert c.post(r.headers["location"], data={"empreinte": empreinte, "nb": "2"}).status_code == 409
+    assert cx.execute("SELECT COUNT(*) AS n FROM baux").fetchone()["n"] == 1 and cx.execute("SELECT COUNT(*) AS n FROM dossiers").fetchone()["n"] == 1
+    csv_ok = ("Code dossier;Raison sociale;Locataire;Local;Prise d'effet;Loyer initial annuel HT;TVA (%)\r\n"
+              "MARCHE;SCI du Marché;Café de la Gare;2 place de la Gare;01/04/2023;15 000,00;8,5\r\n").encode("cp1252")
+    r = c.post("/import", files={"fichier": ("export.csv", csv_ok, "text/csv")}, follow_redirects=False)
+    assert r.status_code == 303 and "SCI du Marché" in c.get(r.headers["location"]).text      # CSV d'Excel : point-virgule, cp1252
+    for nom, contenu, attendu in (("x.xls", b"abc", "Format refusé"), ("x.xlsx", b"pas un classeur", "pas un classeur Excel"),
+                                  ("x.csv", b"Code dossier;Locataire;Truc\nA;B;C\n", "Colonne(s) inconnue(s) : Truc"),
+                                  ("x.csv", b"Code dossier;Locataire\nAB;C\n", "obligatoire(s) absente(s)"),
+                                  ("x.xlsx", _classeur([]), "feuille « Baux » est vide")):
+        r = c.post("/import", files={"fichier": (nom, contenu, "application/octet-stream")})
+        assert r.status_code == 400 and attendu in r.text, nom

@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% import "_ecart.html" as E with context %}
 {% block contenu %}
 <h1>Loyers facturés, tous dossiers</h1>
-<p class="sous-titre">{{ s.nb_dossiers }} dossiers, {{ s.nb_baux }} baux. Loyer attendu selon les baux, comparé aux abonnements Pennylane en cours. <a href="/nouveau-dossier">Nouveau dossier</a></p>
+<p class="sous-titre">{{ s.nb_dossiers }} dossiers, {{ s.nb_baux }} baux. Loyer attendu selon les baux, comparé aux abonnements Pennylane en cours. <a href="/nouveau-dossier">Nouveau dossier</a> · <a href="/import">Importer un fichier Excel ou CSV</a></p>
 
 <div class="tuiles">
   <div class="tuile"><div class="libelle">Loyers attendus</div><div class="valeur">{{ s.attendu | eur }}</div><div class="note">par an, hors taxes, charges comprises</div></div>

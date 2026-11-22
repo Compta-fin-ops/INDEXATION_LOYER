@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block titre %}Import en lot · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="fil"><a href="/">Tableau de bord</a> / {% if imp %}<a href="/import">Import en lot</a> / {{ imp.nom_fichier }}{% else %}Import en lot{% endif %}</div>
+<h1>Importer des sociétés et des baux</h1>
+<p class="sous-titre">Un fichier Excel ou CSV, une ligne par bail. L'import ne fait que créer : rien de ce qui existe n'est modifié.</p>
+{% if erreur %}<div class="bandeau erreur">{{ erreur }}</div>{% endif %}
+{% if not imp %}
+<div class="deux">
+  <div class="carte">
+    <h2>1. Remplir le modèle</h2>
+    <p style="margin-top: 0">Le modèle contient une feuille « Baux » à remplir, une feuille d'exemple et la notice des colonnes.</p>
+    <p class="actions"><a class="bouton" href="/import/modele.xlsx">Télécharger le modèle Excel</a></p>
+    <p class="discret petit" style="margin: 12px 0 0">Un fichier CSV est accepté s'il reprend les mêmes titres de colonnes, séparés par des points-virgules.</p>
+  </div>
+  <form method="post" action="/import" enctype="multipart/form-data" class="carte">
+    <h2>2. Déposer le fichier</h2>
+    <div class="depot" style="margin-top: 0"><input type="file" name="fichier" accept=".xlsx,.csv" required aria-label="Fichier à importer">
+      <button class="principal" type="submit">Analyser</button></div>
+    <p class="discret petit" style="margin: 12px 0 0">Rien n'est créé à cette étape. La page suivante montre chaque ligne, le loyer en vigueur calculé, et les erreurs éventuelles.</p>
+  </form>
+</div>
+<div class="carte">
+  <h2>Colonnes attendues</h2>
+  <div class="defile"><table>
+    <thead><tr><th>Colonne</th><th>Obligatoire</th><th>À saisir</th></tr></thead>
+    <tbody>{% for titre, champ, obligatoire, aide in COLONNES %}<tr><td class="fort">{{ titre }}</td><td>{{ 'oui' if obligatoire }}</td><td class="discret">{{ aide }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% if recents %}<div class="carte"><h2>Derniers fichiers</h2><ul class="liste">
+  {% for r in recents %}<li><span><a class="fort" href="/import/{{ r.id }}">{{ r.nom_fichier }}</a> <span class="pastille {{ 'ok' if r.etat == 'importé' else 'neutre' }}">{{ r.etat | capitalize }}</span></span><span class="discret petit">{{ r.horodatage[:10] | date_fr }} {{ r.horodatage[11:16] }} · {{ r.auteur }}</span></li>{% endfor %}
+</ul></div>{% endif %}
+{% else %}
+{% if imp.etat == 'importé' %}<div class="bandeau succes">Fichier importé. Les lignes ci-dessous sont désormais dans la console.</div>
+{% elif analyse.nb_erreur %}<div class="bandeau erreur">{{ analyse.nb_erreur }} ligne(s) en erreur : rien ne sera importé tant qu'elles ne sont pas corrigées. Corriger le fichier, puis le déposer de nouveau.</div>
+{% elif not analyse.nb_creer %}<div class="bandeau">Rien à créer : toutes les lignes sont déjà dans la console.</div>{% endif %}
+<div class="tuiles">
+  <div class="tuile bon"><div class="libelle">À créer</div><div class="valeur">{{ analyse.nb_creer }}</div><div class="note">bail/baux, dans {{ analyse.nouveaux | length }} nouvelle(s) société(s)</div></div>
+  <div class="tuile"><div class="libelle">Déjà présents</div><div class="valeur">{{ analyse.nb_ignorer }}</div><div class="note">ignorés, non modifiés</div></div>
+  <div class="tuile {{ 'alerte' if analyse.nb_erreur else 'bon' }}"><div class="libelle">En erreur</div><div class="valeur">{{ analyse.nb_erreur }}</div><div class="note">une seule bloque tout l'import</div></div>
+</div>
+<div class="carte">
+  <h2>{{ imp.nom_fichier }}, ligne par ligne</h2>
+  <div class="defile"><table>
+    <thead><tr><th>Ligne</th><th>Société</th><th>Bail</th><th>Prise d'effet</th><th>Indice</th><th class="num">Loyer initial</th><th class="num">Loyer en vigueur calculé</th><th>Sort</th></tr></thead>
+    <tbody>
+    {% for x in analyse.lignes %}{% set v = x.valeurs %}
+    <tr>
+      <td>{{ x.n }}</td>
+      <td><span class="fort">{{ x.dossier or '—' }}</span>{% if x.dossier_nouveau and x.etat != 'erreur' %} <span class="pastille neutre">nouvelle</span>{% endif %}<div class="discret petit">{{ x.nom }}</div></td>
+      <td><span class="fort">{{ v.code }}</span> {{ v.locataire }}<div class="discret petit">{{ v.local }}</div></td>
+      <td>{{ v.date_effet | date_fr }}</td>
+      <td style="white-space: nowrap">{{ v.indice }} {{ v.trimestre_base }}<div class="discret petit">{{ v.methode | lower }}, {{ v.periodicite_revision_ans }} an{{ 's' if v.periodicite_revision_ans > 1 }}{% if v.plafond_annuel_pct is not none %}, plafond {{ ('%g' | format(v.plafond_annuel_pct)) | replace('.', ',') }} %{% endif %}</div></td>
+      <td class="num">{{ v.loyer_initial_annuel | eur2 }}</td>
+      <td class="num fort">{{ x.loyer_en_vigueur | eur2 }}</td>
+      <td>{% if x.etat == 'erreur' %}<span class="pastille bloquant">Erreur</span>{% for e in x.erreurs %}<div class="negatif petit">{{ e }}</div>{% endfor %}
+          {% elif x.etat == 'ignorer' %}<span class="pastille neutre">Déjà présent</span>
+          {% else %}<span class="pastille ok">À créer</span>{% endif %}
+          {% for a in x.avertissements %}<div class="petit" style="color: var(--ambre)">{{ a }}</div>{% endfor %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% if imp.etat == 'analysé' and analyse.possible %}
+<form method="post" action="/import/{{ imp.id }}" class="carte">
+  <h2>Confirmer</h2>
+  <input type="hidden" name="empreinte" value="{{ imp.empreinte }}"><input type="hidden" name="nb" value="{{ analyse.nb_creer }}">
+  <p style="margin-top: 0">Comparer le « loyer en vigueur calculé » au loyer que vous facturez aujourd'hui : un écart signale presque toujours un trimestre de départ ou une méthode à corriger dans le fichier.</p>
+  <p class="actions"><button class="principal" type="submit">Créer {{ analyse.nb_creer }} bail/baux{% if analyse.nouveaux %} et {{ analyse.nouveaux | length }} société(s){% endif %}</button> <a class="bouton" href="/import">Abandonner</a></p>
+</form>
+{% else %}<p class="actions"><a class="bouton" href="/import">{{ 'Importer un autre fichier' if imp.etat == 'importé' else 'Déposer un fichier corrigé' }}</a>{% if imp.etat == 'importé' %}<a class="bouton" href="/">Tableau de bord</a>{% endif %}</p>{% endif %}
+{% endif %}
+{% endblock %}

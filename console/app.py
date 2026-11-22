@@ -9,12 +9,13 @@ sur confirmation explicite, verrous levés (console/ecriture.py), et ne modifie 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import sqlite3
 import tempfile
 import urllib.parse
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -25,7 +26,7 @@ from fastapi.templating import Jinja2Templates
 from indexation_loyer import calcul
 from indexation_loyer.baux import DECISIONS, INDICES, METHODES, PERIODICITES_FACTURATION, TYPES_BAIL, est_gel
 
-from . import __version__, comptes, db, depot, ecriture, pieces, rapprochement as rp, referentiel, simulation
+from . import __version__, comptes, db, depot, ecriture, import_tableur, pieces, rapprochement as rp, referentiel, simulation
 
 ICI = Path(__file__).resolve().parent
 STATUTS_ABONNEMENT = {"in_progress": "en cours", "not_started": "programmé", "finished": "terminé", "stopped": "arrêté",
@@ -532,6 +533,66 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         nom = urllib.parse.quote(p["nom"])
         return Response(chemin.read_bytes(), media_type=p["type_mime"], headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{nom}", "X-Content-Type-Options": "nosniff"})
+
+    # -------------------------------------------------------------- import en lot
+    def page_import(request: Request, erreur: str = "", statut: int = 200, imp: dict | None = None, analyse: dict | None = None):
+        recents = [dict(r) for r in cx.execute("SELECT id, horodatage, auteur, nom_fichier, etat FROM imports ORDER BY id DESC LIMIT 8")]
+        return gabarits.TemplateResponse(request, "import.html", contexte(
+            request, page="bord", erreur=erreur, imp=imp, analyse=analyse, recents=recents,
+            COLONNES=import_tableur.COLONNES), status_code=statut)
+
+    @app.get("/import", response_class=HTMLResponse)
+    def import_accueil(request: Request):
+        return page_import(request)
+
+    @app.get("/import/modele.xlsx")
+    def import_modele():
+        return Response(import_tableur.modele_xlsx(), headers={"Content-Disposition": 'attachment; filename="modele_import_baux.xlsx"'},
+                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    @app.post("/import")
+    async def import_deposer(request: Request):
+        fichier = (await request.form()).get("fichier")
+        if fichier is None or isinstance(fichier, str) or not fichier.filename:
+            return page_import(request, "Aucun fichier choisi.", 400)
+        contenu = await fichier.read(import_tableur.TAILLE_MAX + 1)
+        nom = Path(fichier.filename).name
+        try:
+            lignes = import_tableur.lire(nom, contenu)
+        except import_tableur.ImportRefuse as exc:
+            return page_import(request, str(exc), 400)
+        cur = cx.execute("INSERT INTO imports (horodatage, auteur, nom_fichier, empreinte, lignes) VALUES (?,?,?,?,?)",
+                         (datetime.now().isoformat(timespec="seconds"), referentiel.utilisateur(), nom,
+                          hashlib.sha256(contenu).hexdigest(), json.dumps(lignes, ensure_ascii=False)))
+        cx.commit()
+        return RedirectResponse(f"/import/{cur.lastrowid}", status_code=303)
+
+    def import_ou_404(import_id: int) -> tuple[dict, dict]:
+        imp = cx.execute("SELECT * FROM imports WHERE id=?", (import_id,)).fetchone()
+        if imp is None:
+            raise HTTPException(404, "Import inconnu")
+        return dict(imp), import_tableur.analyser(cx, json.loads(imp["lignes"]), table_indices(), jour())
+
+    @app.get("/import/{import_id}", response_class=HTMLResponse)
+    def import_apercu(request: Request, import_id: int):
+        imp, analyse = import_ou_404(import_id)
+        return page_import(request, imp=imp, analyse=analyse)
+
+    @app.post("/import/{import_id}")
+    async def import_confirmer(request: Request, import_id: int):
+        imp, analyse = import_ou_404(import_id)
+        champs = await formulaire(request)
+        if imp["etat"] != "analysé":
+            return page_import(request, "Ce fichier a déjà été importé.", 409, imp, analyse)
+        if champs.get("empreinte") != imp["empreinte"] or champs.get("nb") != str(analyse["nb_creer"]):
+            return page_import(request, "La situation a changé depuis l'aperçu : le relire avant de confirmer.", 409, imp, analyse)
+        try:
+            import_tableur.executer(cx, analyse, imp["nom_fichier"])
+        except import_tableur.ImportRefuse as exc:
+            return page_import(request, str(exc), 409, imp, analyse)
+        cx.execute("UPDATE imports SET etat='importé' WHERE id=?", (import_id,))
+        cx.commit()
+        return RedirectResponse(f"/import/{import_id}", status_code=303)
 
     # ------------------------------------------------------------------- indices
     @app.get("/indices", response_class=HTMLResponse)

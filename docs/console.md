@@ -23,6 +23,7 @@ brouillon. Il n'y a plus de classeur Excel dans le circuit.
 | Besoin | Où |
 |---|---|
 | Créer une société bailleresse | Tableau de bord, « Nouveau dossier » |
+| Créer plusieurs sociétés et baux d'un coup, depuis Excel ou CSV | Tableau de bord, « Importer un fichier Excel ou CSV » |
 | Saisir un bail : loyer initial, date d'effet, indice, trimestre de départ, périodicité, méthode, plafond | Page du dossier, « Nouveau bail » |
 | Voir les révisions calculées, de la première aux deux prochaines | Page du bail, tableau « Révisions » |
 | Geler une révision, avec ou sans rattrapage, et noter pourquoi | Même tableau : décision, commentaire, date d'envoi du courrier |
@@ -42,6 +43,24 @@ Trois règles de gestion à connaître.
 
 Le moteur de calcul est celui du paquet `indexation_loyer`, déjà contrôlé cellule à cellule contre les formules
 de l'ancien classeur. Un test vérifie que la console retrouve, bail par bail, les loyers que le classeur calculait.
+
+### Importer en lot depuis Excel ou CSV
+
+1. Page « Importer » : télécharger le modèle Excel. Il contient la feuille « Baux » à remplir, un exemple et la
+   notice des colonnes. Une ligne par bail ; les colonnes de la société se répètent sur chacun de ses baux.
+2. Déposer le fichier : la console l'analyse **sans rien créer** et affiche chaque ligne avec son sort (à créer,
+   déjà présent, en erreur) et le loyer en vigueur qu'elle calcule.
+3. Confirmer : les sociétés et les baux sont créés d'un bloc.
+
+| Règle | Effet |
+|---|---|
+| Création seulement | Une société ou un bail déjà présent n'est jamais modifié : la ligne est ignorée |
+| Tout ou rien | Une seule ligne en erreur et rien n'entre : corriger le fichier et le redéposer |
+| Aperçu obligatoire | Si la situation change entre l'aperçu et la confirmation, la confirmation est refusée |
+| CSV | Mêmes titres de colonnes ; point-virgule et encodage d'Excel sous Windows acceptés |
+
+Le loyer en vigueur calculé dans l'aperçu est le contrôle à faire avant de confirmer : s'il diffère du loyer
+facturé aujourd'hui, le trimestre de départ ou la méthode du fichier est à revoir.
 
 ### Reprendre un ancien classeur
 
@@ -115,6 +134,7 @@ par échéance est le plus proche.
 | Règles de rapprochement, rappel de loyer, proposition d'abonnement | Testées |
 | Verrous de la création d'abonnement, réponse perdue, refus de Pennylane | Testés contre un faux Pennylane, 9 tests |
 | Saisie d'un bail, calcul, gel, courrier PDF, pièces jointes, historique, sauvegarde | Testés, 11 tests |
+| Import en lot : modèle, aperçu, confirmation, tout ou rien, fichiers refusés | Testé, et parcours vérifié dans un navigateur |
 | Comptes, rôles, session, blocage après échecs, mot de passe provisoire | Testés, 7 tests, et parcours vérifié dans un navigateur |
 | Lanceur `lancer_console.bat` et notice Windows | **Non essayés sur Windows** |
 | Reprise d'un ancien classeur | Testée : la console retrouve les loyers du classeur de démonstration |

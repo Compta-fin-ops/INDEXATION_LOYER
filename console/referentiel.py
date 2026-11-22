@@ -243,7 +243,8 @@ def tracer(cx: sqlite3.Connection, action: str, detail: str = "", dossier: str =
                (datetime.now().isoformat(timespec="seconds"), utilisateur(), dossier, bail_id, action, detail))
 
 
-def enregistrer_bail(cx: sqlite3.Connection, dossier: str, valeurs: dict, bail_id: int | None = None) -> int:
+def enregistrer_bail(cx: sqlite3.Connection, dossier: str, valeurs: dict, bail_id: int | None = None,
+                     valider: bool = True) -> int:
     """Crée ou modifie un bail géré par la console. La modification liste les champs changés à l'historique."""
     colonnes = [c for c in CHAMPS_BAIL if c in valeurs]
     if bail_id is None:
@@ -263,7 +264,8 @@ def enregistrer_bail(cx: sqlite3.Connection, dossier: str, valeurs: dict, bail_i
             changes.insert(0, "Loyer désormais calculé par la console")
         if changes:
             tracer(cx, "Bail modifié", " ; ".join(changes), dossier, bail_id)
-    cx.commit()
+    if valider:                                      # l'import en lot valide tout d'un bloc
+        cx.commit()
     return bail_id
 
 
