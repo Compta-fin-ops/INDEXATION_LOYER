@@ -15,8 +15,8 @@
     <label>Signataire des courriers<input name="signataire" value="{{ d.signataire or '' }}"></label>
     <label>Qualité<input name="qualite_signataire" value="{{ d.qualite_signataire or '' }}"></label>
     <label>Ville de signature<input name="ville_signature" value="{{ d.ville_signature or '' }}"></label>
-    <label class="large">Variable d'environnement du jeton Pennylane<input name="variable_jeton" value="{{ d.variable_jeton or '' }}" placeholder="PENNYLANE_TOKEN_{{ d.code or 'CODE' }}" autocomplete="off">
-      <span class="aide">Le nom de la variable, jamais le jeton. Le jeton reste sur le poste qui fait tourner la console et n'entre ni dans la base ni dans le dépôt. Laisser vide tant que le dossier n'est pas raccordé.</span></label>
+    <label class="large">Nom technique du jeton Pennylane, facultatif<input name="variable_jeton" value="{{ d.variable_jeton or '' }}" placeholder="PENNYLANE_TOKEN_{{ d.code or 'CODE' }}" autocomplete="off">
+      <span class="aide">À laisser vide : il est attribué tout seul quand vous déposez le jeton depuis la page « Raccordement Pennylane » du dossier. Ce champ reçoit un nom, jamais le jeton.</span></label>
   </div>
   <p class="actions"><button class="principal" type="submit">Enregistrer</button> <a class="bouton" href="{{ '/' if creation else '/dossiers/' ~ d.code }}">Annuler</a></p>
 </form>

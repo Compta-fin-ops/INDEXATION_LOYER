@@ -24,6 +24,8 @@ import urllib.request
 from datetime import date
 from typing import Any, Iterator, Protocol
 
+from . import jetons
+
 log = logging.getLogger(__name__)
 BASE_V2 = "https://app.pennylane.com/api/external/v2"
 PAUSE_ENTRE_APPELS = 0.25            # 4 appels par seconde, sous la limite annoncée de 5
@@ -103,8 +105,9 @@ def marques_sandbox(corps, chemin: str = "") -> list[str]:
 
 
 class ClientReel:
-    """API Entreprise v2. Le jeton de chaque dossier est lu dans la variable d'environnement
-    déclarée pour ce dossier (table dossiers.variable_jeton) : il n'est jamais stocké."""
+    """API Entreprise v2. Le jeton de chaque dossier est lu dans une variable d'environnement, à défaut
+    dans le coffre du système (console/jetons.py), sous le nom porté par dossiers.variable_jeton.
+    Il n'est jamais dans la base."""
 
     def __init__(self, variables_jeton: dict[str, str], base_url: str = BASE_V2, profondeur_mois: int = 36):
         self.variables_jeton = variables_jeton
@@ -113,9 +116,9 @@ class ClientReel:
 
     def _jeton(self, dossier: str) -> str:
         variable = self.variables_jeton.get(dossier, "")
-        jeton = os.environ.get(variable, "") if variable else ""
+        jeton = jetons.lire(variable)                    # variable d'environnement, sinon coffre du système
         if not jeton:
-            raise RuntimeError(f"Dossier {dossier} : variable d'environnement {variable or '(non déclarée)'} absente")
+            raise RuntimeError(f"Dossier {dossier} : aucun jeton Pennylane enregistré pour ce dossier sur ce poste")
         return jeton
 
     def _pages(self, dossier: str, chemin: str, filtre: list[dict] | None = None) -> Iterator[dict]:

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block titre %}Pennylane · {{ d.nom }} · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="fil"><a href="/">Tableau de bord</a> / <a href="/dossiers/{{ d.code }}">{{ d.nom }}</a> / Raccordement Pennylane</div>
+<h1>Raccordement de {{ d.nom }} à Pennylane</h1>
+<p class="sous-titre">Le jeton donne à la console le droit de lire ce dossier dans Pennylane. Il se génère dans Pennylane : « Paramètres entreprise », « Connectivité », onglet « Développeurs ».</p>
+{% if erreur %}<div class="bandeau erreur">{{ erreur }}</div>{% endif %}
+{% if message %}<div class="bandeau succes">{{ message }}</div>{% endif %}
+<div class="deux">
+  <div class="carte">
+    <h2>Jeton de lecture</h2>
+    <p style="margin-top: 0">{% if source == 'coffre' %}<span class="pastille ok">Enregistré</span> dans le {{ nom_coffre }}, sur ce poste.
+      {% elif source == 'environnement' %}<span class="pastille ok">Fourni</span> par la variable d'environnement <code>{{ d.variable_jeton }}</code>.
+      {% else %}<span class="pastille a_traiter">Absent</span> Aucun jeton pour ce dossier sur ce poste.{% endif %}</p>
+    {% if utilisateur.role == 'administrateur' and coffre %}
+    <form method="post" action="/dossiers/{{ d.code }}/jeton" class="formulaire une" autocomplete="off">
+      <label>{{ 'Remplacer le jeton' if source == 'coffre' else 'Coller le jeton' }}<input type="password" name="jeton" required autocomplete="new-password" spellcheck="false">
+        <span class="aide">Il est rangé dans le {{ nom_coffre }}, protégé par votre session Windows. Il n'entre ni dans la base ni dans les sauvegardes, et la console ne le réaffiche jamais.</span></label>
+      <p class="actions" style="margin: 0"><button class="principal" type="submit">Enregistrer et tester</button></p>
+    </form>
+    {% if source == 'coffre' %}<form method="post" action="/dossiers/{{ d.code }}/jeton" style="margin-top: 12px"><input type="hidden" name="action" value="retirer"><button type="submit">Retirer le jeton du coffre</button></form>{% endif %}
+    {% elif not coffre %}<p class="discret petit" style="margin-bottom: 0">Cette machine n'a pas de coffre utilisable : le jeton se déclare par la variable d'environnement <code>{{ d.variable_jeton or 'PENNYLANE_TOKEN_' ~ d.code }}</code>, lue au démarrage de la console.</p>
+    {% else %}<p class="discret petit" style="margin-bottom: 0">Le dépôt d'un jeton est réservé à un administrateur.</p>{% endif %}
+  </div>
+  <div class="carte">
+    <h2>Tester la connexion</h2>
+    <p style="margin-top: 0">Deux lectures, aucune écriture : l'identité du jeton, puis une page d'abonnements. Rien n'est modifié dans Pennylane.</p>
+    {% if source and utilisateur.role != 'lecture' %}<form method="post" action="/dossiers/{{ d.code }}/connexion-pennylane"><button type="submit">Tester la connexion</button></form>
+    {% elif not source %}<p class="discret petit" style="margin-bottom: 0">Enregistrer d'abord un jeton.</p>{% endif %}
+  </div>
+</div>
+{% if b and b.jeton_present %}
+<div class="tuiles">
+  <div class="tuile {{ 'bon' if b.me.code == 200 else 'alerte' }}"><div class="libelle">Identité du jeton</div><div class="valeur">{{ 'Reconnu' if b.me.code == 200 else 'Échec' }}</div><div class="note">{{ 'HTTP ' ~ b.me.code if b.me.code else 'aucune réponse' }}{% if b.me.message %} · {{ b.me.message }}{% endif %}</div></div>
+  <div class="tuile {{ 'bon' if b.abonnements.lisible else 'alerte' }}"><div class="libelle">Lecture des abonnements</div><div class="valeur">{{ 'Possible' if b.abonnements.lisible else 'Échec' }}</div><div class="note">{{ 'HTTP ' ~ b.abonnements.code if b.abonnements.code else 'aucune réponse' }}{% if b.abonnements.message %} · {{ b.abonnements.message }}{% endif %}</div></div>
+  <div class="tuile {{ 'bon' if b.sandbox else 'attention' }}"><div class="libelle">Environnement de test Pennylane</div><div class="valeur">{{ 'Reconnu' if b.sandbox else 'Non reconnu' }}</div><div class="note">{{ 'marque « Sandbox » trouvée dans la réponse' if b.sandbox else 'aucune marque « Sandbox » dans la réponse' }}</div></div>
+</div>
+{% if b.sandbox %}<div class="bandeau succes">Ce jeton donne accès à un environnement de test Pennylane : {{ b.marques | join(' ; ') }}.</div>
+{% elif b.me.code == 200 %}<div class="bandeau">Rien dans la réponse ne désigne un environnement de test : ce jeton est à considérer comme celui d'un dossier réel.</div>{% endif %}
+{% if b.me.code in (401, 403) or b.abonnements.code in (401, 403) %}<div class="bandeau erreur">Pennylane refuse le jeton ou l'un de ses droits. Vérifier qu'il est bien copié en entier, qu'il n'a pas expiré, et qu'il porte au moins le droit de lecture des abonnements.</div>{% endif %}
+{% if brut %}<div class="carte">
+  <h2>Ce que Pennylane renvoie sur ce jeton</h2>
+  <p class="discret petit" style="margin: 0">Réponse brute de la route d'identité. Elle ne contient pas le jeton.</p>
+  <pre>{{ brut }}</pre>
+</div>{% endif %}
+{% elif b %}<div class="bandeau erreur">{{ b.erreur }}</div>{% endif %}
+<p class="actions"><a class="bouton" href="/dossiers/{{ d.code }}">Retour au dossier</a></p>
+{% endblock %}

@@ -144,7 +144,7 @@ def test_normalisation_du_format_api():
 def test_client_reel_refuse_sans_jeton(monkeypatch):
     monkeypatch.delenv("PENNYLANE_TOKEN_X", raising=False)
     client = pennylane_api.ClientReel({"X": "PENNYLANE_TOKEN_X"})
-    with pytest.raises(RuntimeError, match="PENNYLANE_TOKEN_X"):
+    with pytest.raises(RuntimeError, match="aucun jeton Pennylane enregistré"):
         client.abonnements("X")
     cx = db.connecter(":memory:")
     depot.enregistrer_dossier(cx, "X", "Dossier X", variable_jeton="PENNYLANE_TOKEN_X")
