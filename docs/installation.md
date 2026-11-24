@@ -103,6 +103,12 @@ Avec GitHub Desktop : se connecter avec son compte GitHub, menu « File », « C
 `claude/suivi-reindexations-loyers-ag5rbc` dans « Current Branch ». Reprendre ensuite les données comme à
 l'étape 4 ci-dessus. `mettre_a_jour.bat` ne fonctionne pas avec cette voie : GitHub Desktop garde son propre Git.
 
+**Avec GitHub Desktop, ne jamais cliquer sur « Commit » ni sur « Push ».** L'application sert ici à recevoir
+les mises à jour, pas à en envoyer. Si l'onglet « Changes » liste des fichiers modifiés, c'est qu'un fichier du
+programme a été changé sur le poste par mégarde : clic droit sur le fichier, « Discard changes ». Vos données
+(`data\cabinet.sqlite`, `data\pieces`, `data\test`) n'apparaissent jamais dans cette liste : elles ne partent
+pas vers GitHub.
+
 Quelle que soit la voie, `lancer_console.bat` installe de lui-même les composants qu'une nouvelle version
 réclamerait : après une mise à jour, il suffit de le relancer.
 
