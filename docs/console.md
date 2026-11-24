@@ -136,16 +136,24 @@ python -m console serve                # http://127.0.0.1:8000
 
 Sur Windows, sans ligne de commande : double-clic sur `lancer_console.bat`, voir [installation.md](installation.md).
 
-## Tester la connexion d'un dossier à Pennylane
+## Raccorder un dossier à Pennylane
 
-Page du dossier, bouton « Tester la connexion Pennylane ». Deux lectures, aucune écriture : l'identité du jeton
-(`GET /me`), puis une page d'abonnements. La page affiche le code de chaque réponse, la réponse brute de
-l'identité, et si elle porte la marque d'un environnement de test Pennylane. Le jeton n'est jamais affiché.
+Page du dossier, bouton « Raccordement Pennylane ».
+
+1. **Déposer le jeton de lecture** : un administrateur le colle une fois dans la page. Il est rangé dans le coffre
+   du système (sous Windows, le Gestionnaire d'identification), protégé par la session de l'utilisateur. Il
+   n'entre ni dans la base ni dans les sauvegardes, et la console ne le réaffiche jamais. Aucune variable
+   d'environnement à créer sur le poste.
+2. **Tester la connexion** : deux lectures, aucune écriture. L'identité du jeton (`GET /me`), puis une page
+   d'abonnements. La page affiche le code de chaque réponse, la réponse brute de l'identité, et si elle porte la
+   marque d'un environnement de test Pennylane.
+
+Sur un serveur, où il n'y a pas de coffre, le jeton se fournit par une variable d'environnement du nom
+`PENNYLANE_TOKEN_CODE`. Quand les deux existent, la variable passe devant.
 
 Pour s'exercer sans enjeu : créer son environnement de test dans Pennylane (« Mon compte », « Environnements de
-test »), y générer un jeton (« Paramètres entreprise », « Connectivité », onglet « Développeurs »), le déclarer
-sur le poste dans une variable `PENNYLANE_TOKEN_SANDBOX`, et créer dans la **base de test** de la console un
-dossier `SANDBOX` qui porte ce nom de variable.
+test »), y générer un jeton (« Paramètres entreprise », « Connectivité », onglet « Développeurs »), puis créer
+dans la **base de test** de la console un dossier `SANDBOX` et y déposer ce jeton.
 
 ## Passer aux dossiers réels
 
@@ -153,8 +161,8 @@ dossier `SANDBOX` qui porte ce nom de variable.
 # 1. créer le dossier et ses baux dans la console (ou reprendre un ancien classeur, voir plus haut)
 python -m console --base data/cabinet.sqlite serve
 
-# 2. jetons : un jeton API Entreprise v2 par dossier, en lecture seule, dans l'environnement
-export PENNYLANE_TOKEN_HALLES=…
+# 2. jetons : un jeton API Entreprise v2 par dossier, en lecture seule, déposé depuis la page
+#    « Raccordement Pennylane » du dossier (ou, sur un serveur : export PENNYLANE_TOKEN_HALLES=…)
 
 # 3. collecte
 python -m console --base data/cabinet.sqlite synchroniser
@@ -264,7 +272,7 @@ première connexion. Un compte ne se supprime pas, il se désactive : l'historiq
 | Formulaire posté depuis un autre site | Refusé : l'en-tête `Origin`, à défaut `Referer`, doit désigner la console |
 | Traçabilité | L'historique des baux et le journal des envois portent l'identifiant de l'auteur |
 | Écritures simultanées | Une requête à la fois sur la base |
-| Jetons Pennylane | Ni dans la base ni dans le dépôt : la base ne retient que le nom des variables d'environnement. Le formulaire de dossier refuse toute valeur qui n'a pas la forme `PENNYLANE_TOKEN_CODE` |
+| Jetons Pennylane | Ni dans la base ni dans le dépôt : ils vivent dans le coffre du système ou dans une variable d'environnement, et la base ne retient que leur nom technique. Dépôt réservé à un administrateur ; un jeton n'est jamais réaffiché. Le jeton d'écriture reste, à ce stade, une variable d'environnement |
 | Pièces jointes | Extension et contenu concordants (PDF, PNG, JPEG, Word), 25 Mo au plus, rangées sous leur empreinte, servies en téléchargement |
 | Données | La base et les pièces sont exclues du dépôt |
 

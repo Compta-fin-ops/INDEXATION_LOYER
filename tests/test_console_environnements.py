@@ -140,7 +140,7 @@ def test_tester_la_connexion_pennylane_lecture_seule(production, monkeypatch):
     monkeypatch.delenv("PENNYLANE_TOKEN_HALLES", raising=False)
     monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", lambda *a, **k: pytest.fail("appel sans jeton"))
     page = c.post("/dossiers/HALLES/connexion-pennylane").text
-    assert "PENNYLANE_TOKEN_HALLES" in page and "variables d" in page
+    assert "aucun jeton Pennylane enregistré" in page and "Coller le jeton" in page
     # jeton d'un environnement de test : deux lectures GET, la marque Sandbox est reconnue, le jeton n'est jamais affiché
     appels = []
 
@@ -172,3 +172,60 @@ def test_tester_la_connexion_pennylane_lecture_seule(production, monkeypatch):
     assert len(h) == 4 and "environnement de test reconnu" in h[1] and "jeton-secret" not in " ".join(h)
     lecteur = client_connecte(creer_app(prod, AUJ), prod, "lecture")
     assert lecteur.post("/dossiers/HALLES/connexion-pennylane").status_code == 403
+
+
+def test_jeton_depose_dans_le_coffre_depuis_la_console(production, monkeypatch, coffre):
+    """Le jeton se colle une fois dans la console : il va au coffre du système, jamais dans la base ni à l'écran."""
+    from console import jetons, pennylane_api
+    prod, c, _ = production
+    monkeypatch.delenv("PENNYLANE_TOKEN_HALLES", raising=False)
+    JETON = "pl_test_0123456789abcdefghijklmnopqrstuvwxyz"
+    vus = []
+
+    def faux(req, timeout=30):
+        vus.append(req.get_header("Authorization"))
+        return _Reponse({"company": {"name": "Sandbox - moi@exemple.fr"}} if req.full_url.endswith("/me") else {"items": []})
+
+    monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", faux)
+    page = c.get("/dossiers/HALLES/pennylane").text
+    assert "Absent" in page and "Coller le jeton" in page and not vus                      # afficher la page ne déclenche aucun appel
+    for mauvais, attendu in (("", "Jeton vide"), ("trop court", "espace"), ("PENNYLANE_TOKEN_HALLES", "nom de variable"), ("x" * 19, "Longueur")):
+        r = c.post("/dossiers/HALLES/jeton", data={"jeton": mauvais})
+        assert r.status_code == 400 and attendu in r.text, mauvais
+    assert not coffre.contenu and not vus
+    page = c.post("/dossiers/HALLES/jeton", data={"jeton": f"  {JETON}\n"}).text          # espaces de copier-coller tolérés autour
+    assert coffre.contenu == {("console-loyers", "PENNYLANE_TOKEN_HALLES"): JETON}
+    assert vus == [f"Bearer {JETON}"] * 2 and "Reconnu" in page and "Enregistré" in page    # enregistré, puis testé dans la foulée
+    assert JETON not in page and JETON not in c.get("/dossiers/HALLES/pennylane").text
+    # rien dans la base : ni le jeton, ni dans l'historique
+    import sqlite3
+    brut = "\n".join(sqlite3.connect(prod).iterdump())
+    assert JETON not in brut and "Jeton Pennylane enregistré" in brut
+    assert jetons.source("PENNYLANE_TOKEN_HALLES") == "coffre" and jetons.lire("PENNYLANE_TOKEN_HALLES") == JETON
+    # la variable d'environnement, quand elle existe, passe devant le coffre
+    monkeypatch.setenv("PENNYLANE_TOKEN_HALLES", "jeton-de-la-variable-d-environnement")
+    assert jetons.source("PENNYLANE_TOKEN_HALLES") == "environnement" and jetons.lire("PENNYLANE_TOKEN_HALLES").startswith("jeton-de-la")
+    monkeypatch.delenv("PENNYLANE_TOKEN_HALLES")
+    # réservé à un administrateur
+    gestionnaire = client_connecte(creer_app(prod, AUJ), prod, "gestion")
+    assert gestionnaire.post("/dossiers/HALLES/jeton", data={"jeton": JETON}).status_code == 403
+    assert gestionnaire.get("/dossiers/HALLES/pennylane").status_code == 200
+    assert gestionnaire.post("/dossiers/HALLES/connexion-pennylane").status_code == 200      # tester reste permis à la gestion
+    # retrait
+    assert "Jeton retiré" in c.post("/dossiers/HALLES/jeton", data={"action": "retirer"}).text and not coffre.contenu
+    assert "Aucun jeton à retirer" in c.post("/dossiers/HALLES/jeton", data={"action": "retirer"}).text
+    # un dossier sans nom technique en reçoit un tout seul au dépôt
+    c.post("/dossiers", data={"code": "SANDBOX", "nom": "Bac à sable Pennylane"})
+    c.post("/dossiers/SANDBOX/jeton", data={"jeton": JETON})
+    assert db.connecter(prod).execute("SELECT variable_jeton FROM dossiers WHERE code='SANDBOX'").fetchone()[0] == "PENNYLANE_TOKEN_SANDBOX"
+    assert ("console-loyers", "PENNYLANE_TOKEN_SANDBOX") in coffre.contenu
+
+
+def test_sans_coffre_la_console_le_dit(production, monkeypatch):
+    from console import jetons
+    prod, c, _ = production
+    jetons.definir_coffre(None)
+    monkeypatch.delenv("PENNYLANE_TOKEN_HALLES", raising=False)
+    page = c.get("/dossiers/HALLES/pennylane").text
+    assert "pas de coffre utilisable" in page and "Coller le jeton" not in page
+    assert c.post("/dossiers/HALLES/jeton", data={"jeton": "x" * 40}).status_code == 400

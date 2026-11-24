@@ -26,7 +26,8 @@ from fastapi.templating import Jinja2Templates
 from indexation_loyer import calcul
 from indexation_loyer.baux import DECISIONS, INDICES, METHODES, PERIODICITES_FACTURATION, TYPES_BAIL, est_gel
 
-from . import __version__, comptes, db, depot, ecriture, import_tableur, pieces, rapprochement as rp, referentiel, simulation
+from . import (__version__, comptes, db, depot, ecriture, import_tableur, jetons, pieces, rapprochement as rp,
+               referentiel, simulation)
 
 ICI = Path(__file__).resolve().parent
 STATUTS_ABONNEMENT = {"in_progress": "en cours", "not_started": "programmé", "finished": "terminé", "stopped": "arrêté",
@@ -78,8 +79,8 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
     verrous: dict = {}
 
     def role_requis(methode: str, chemin: str) -> str:
-        if chemin.startswith("/utilisateurs"):
-            return "administrateur"
+        if chemin.startswith("/utilisateurs") or (chemin.endswith("/jeton") and methode == "POST"):
+            return "administrateur"                      # comptes, et dépôt ou retrait d'un jeton Pennylane
         if methode in ("GET", "HEAD", "OPTIONS") or chemin in ("/compte", "/deconnexion"):
             return "lecture"
         if chemin.endswith("/abonnement"):               # création d'un abonnement dans Pennylane
@@ -393,22 +394,61 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         cx.commit()
         return RedirectResponse(f"/dossiers/{code}", status_code=303)
 
-    @app.post("/dossiers/{code}/connexion-pennylane", response_class=HTMLResponse)
-    def dossier_tester_connexion(request: Request, code: str):
-        """Lecture seule : vérifie le jeton du dossier et montre à quelle société Pennylane il donne accès."""
-        from .pennylane_api import ClientReel
+    def page_pennylane(request: Request, d: dict, bilan: dict | None = None, erreur: str = "", message: str = "", statut: int = 200):
+        return gabarits.TemplateResponse(request, "pennylane.html", contexte(
+            request, page="bord", d=d, b=bilan, erreur=erreur, message=message,
+            source=jetons.source(d["variable_jeton"]), coffre=jetons.disponible(), nom_coffre=jetons.nom_du_coffre(),
+            brut=json.dumps(bilan["identite"], ensure_ascii=False, indent=2) if bilan and bilan["identite"] is not None else None),
+            status_code=statut)
+
+    def dossier_reel_ou_409(code: str) -> dict:
         d = dossier_ou_404(code)
         if d["source_referentiel"] == FICTIF:
             raise HTTPException(409, "Dossier fictif : aucune connexion à Pennylane.")
+        return d
+
+    def tester(code: str, d: dict) -> dict:
+        """Lecture seule : vérifie le jeton du dossier et montre à quelle société Pennylane il donne accès."""
+        from .pennylane_api import ClientReel
         bilan = ClientReel({code: d["variable_jeton"]}).tester_connexion(code)
         issue = ("jeton absent" if not bilan["jeton_present"] else
                  f"identité HTTP {bilan['me']['code']}, abonnements HTTP {bilan['abonnements']['code']}"
                  + (", environnement de test reconnu" if bilan["sandbox"] else ""))
         referentiel.tracer(cx, "Connexion Pennylane testée", issue, code)
         cx.commit()
-        return gabarits.TemplateResponse(request, "connexion_pennylane.html", contexte(
-            request, page="bord", d=d, b=bilan,
-            brut=json.dumps(bilan["identite"], ensure_ascii=False, indent=2) if bilan["identite"] is not None else None))
+        return bilan
+
+    @app.get("/dossiers/{code}/pennylane", response_class=HTMLResponse)
+    def dossier_pennylane(request: Request, code: str):
+        return page_pennylane(request, dossier_reel_ou_409(code))
+
+    @app.post("/dossiers/{code}/connexion-pennylane", response_class=HTMLResponse)
+    def dossier_tester_connexion(request: Request, code: str):
+        d = dossier_reel_ou_409(code)
+        return page_pennylane(request, d, tester(code, d))
+
+    @app.post("/dossiers/{code}/jeton", response_class=HTMLResponse)
+    async def dossier_jeton(request: Request, code: str):
+        """Dépose le jeton de lecture dans le coffre du système, ou l'en retire. Il n'entre pas dans la base."""
+        d = dossier_reel_ou_409(code)
+        champs = await formulaire(request)
+        variable = d["variable_jeton"] or f"PENNYLANE_TOKEN_{code}"
+        if champs.get("action") == "retirer":
+            retire = jetons.retirer(variable)
+            if retire:
+                referentiel.tracer(cx, "Jeton Pennylane retiré", f"jeton de lecture · {variable}", code)
+                cx.commit()
+            return page_pennylane(request, d, message="Jeton retiré du coffre." if retire else "Aucun jeton à retirer dans le coffre.")
+        try:
+            jetons.enregistrer(variable, (champs.get("jeton") or "").strip())
+        except (ValueError, jetons.CoffreIndisponible) as exc:
+            return page_pennylane(request, d, erreur=str(exc), statut=400)
+        if not d["variable_jeton"]:
+            cx.execute("UPDATE dossiers SET variable_jeton=? WHERE code=?", (variable, code))
+            d = {**d, "variable_jeton": variable}
+        referentiel.tracer(cx, "Jeton Pennylane enregistré", f"jeton de lecture · {variable} · {jetons.nom_du_coffre()}", code)
+        cx.commit()
+        return page_pennylane(request, d, tester(code, d), message="Jeton enregistré. Résultat du test de connexion ci-dessous.")
 
     # ---------------------------------------------------------------------- baux
     def ligne_bail(bail_id: int) -> dict:

@@ -3,9 +3,8 @@
 {% block contenu %}
 <div class="fil"><a href="/">Tableau de bord</a> / {{ a.dossier.nom }}</div>
 <h1>{{ a.dossier.nom }}</h1>
-<p class="sous-titre">SIREN {{ a.dossier.siren or '—' }} · {{ a.nb_baux }} baux · origine : {{ a.dossier.source_referentiel or '—' }} · jeton lu dans <code>{{ a.dossier.variable_jeton or 'non déclaré' }}</code></p>
-<p class="actions haut"><a class="bouton" href="/dossiers/{{ a.dossier.code }}/baux/nouveau">Nouveau bail</a><a class="bouton" href="/dossiers/{{ a.dossier.code }}/modifier">Modifier le dossier</a>{% if a.dossier.source_referentiel != 'portefeuille fictif' and utilisateur.role != 'lecture' %}</p>
-<form method="post" action="/dossiers/{{ a.dossier.code }}/connexion-pennylane" class="actions haut"><button type="submit">Tester la connexion Pennylane</button><span class="discret petit">Lecture seule : vérifie le jeton et montre à quelle société il donne accès.</span></form>{% else %}</p>{% endif %}
+<p class="sous-titre">SIREN {{ a.dossier.siren or '—' }} · {{ a.nb_baux }} baux · origine : {{ a.dossier.source_referentiel or '—' }} </p>
+<p class="actions haut"><a class="bouton" href="/dossiers/{{ a.dossier.code }}/baux/nouveau">Nouveau bail</a><a class="bouton" href="/dossiers/{{ a.dossier.code }}/modifier">Modifier le dossier</a>{% if a.dossier.source_referentiel != 'portefeuille fictif' %}<a class="bouton" href="/dossiers/{{ a.dossier.code }}/pennylane">Raccordement Pennylane</a>{% endif %}</p>
 <div class="tuiles">
   <div class="tuile"><div class="libelle">Loyers attendus</div><div class="valeur">{{ a.attendu_annuel | eur }}</div><div class="note">par an, hors taxes</div></div>
   <div class="tuile"><div class="libelle">Loyers facturés</div><div class="valeur">{{ a.facture_annuel | eur }}</div><div class="note">abonnements en cours</div></div>
