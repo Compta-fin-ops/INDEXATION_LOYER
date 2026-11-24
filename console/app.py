@@ -394,9 +394,14 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         cx.commit()
         return RedirectResponse(f"/dossiers/{code}", status_code=303)
 
-    def page_pennylane(request: Request, d: dict, bilan: dict | None = None, erreur: str = "", message: str = "", statut: int = 200):
+    def page_pennylane(request: Request, d: dict, bilan: dict | None = None, erreur: str = "", message: str = "", statut: int = 200,
+                       clients: list[dict] | None = None, tronquee: bool = False):
+        rattaches: dict = {}
+        for r in cx.execute("SELECT id, code, locataire, customer_id FROM baux WHERE dossier=? AND customer_id IS NOT NULL", (d["code"],)):
+            rattaches.setdefault(r["customer_id"], []).append(dict(r))
         return gabarits.TemplateResponse(request, "pennylane.html", contexte(
-            request, page="bord", d=d, b=bilan, erreur=erreur, message=message,
+            request, page="bord", d=d, b=bilan, erreur=erreur, message=message, clients=clients, tronquee=tronquee,
+            rattaches=rattaches,
             source=jetons.source(d["variable_jeton"]), coffre=jetons.disponible(), nom_coffre=jetons.nom_du_coffre(),
             brut=json.dumps(bilan["identite"], ensure_ascii=False, indent=2) if bilan and bilan["identite"] is not None else None),
             status_code=statut)
@@ -426,6 +431,17 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
     def dossier_tester_connexion(request: Request, code: str):
         d = dossier_reel_ou_409(code)
         return page_pennylane(request, d, tester(code, d))
+
+    @app.post("/dossiers/{code}/clients-pennylane", response_class=HTMLResponse)
+    def dossier_clients_pennylane(request: Request, code: str):
+        """Lecture seule : les clients du dossier dans Pennylane, pour retrouver l'identifiant à porter sur un bail."""
+        from .pennylane_api import ClientReel
+        d = dossier_reel_ou_409(code)
+        try:
+            clients, tronquee = ClientReel({code: d["variable_jeton"]}).clients(code)
+        except RuntimeError as exc:
+            return page_pennylane(request, d, erreur=f"{exc}. Vérifier que le jeton porte le droit de lecture des clients.", statut=502)
+        return page_pennylane(request, d, clients=clients, tronquee=tronquee)
 
     @app.post("/dossiers/{code}/jeton", response_class=HTMLResponse)
     async def dossier_jeton(request: Request, code: str):

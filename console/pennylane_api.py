@@ -195,6 +195,23 @@ class ClientReel:
                                 "lisible": isinstance(corps, dict) and isinstance(corps.get("items"), list)}
         return bilan
 
+    def clients(self, dossier: str, maximum: int = 300) -> tuple[list[dict], bool]:
+        """Clients du dossier dans Pennylane : (liste, tronquée ?). Lecture seule.
+
+        Sert à retrouver l'identifiant numérique à inscrire sur un bail. La route est déduite de l'adresse
+        `…/customers/42` que renvoient les abonnements ; le schéma de la liste n'a pas été vérifié, d'où une
+        lecture tolérante du nom."""
+        sortie: list[dict] = []
+        for c in self._pages(dossier, "/customers"):
+            if len(sortie) >= maximum:
+                return sortie, True
+            nom = _premier(c, "name", "label", "company_name") or " ".join(
+                str(c.get(k) or "") for k in ("first_name", "last_name")).strip()
+            courriels = c.get("emails") if isinstance(c.get("emails"), list) else [c.get("email")] if c.get("email") else []
+            sortie.append({"id": c.get("id"), "nom": nom or "(sans nom)", "courriel": ", ".join(str(x) for x in courriels[:2]),
+                           "immatriculation": _premier(c, "reg_no", "registration_number", defaut="")})
+        return sortie, False
+
     def abonnements(self, dossier: str) -> list[dict]:
         return [normaliser_abonnement(a) for a in self._pages(dossier, "/billing_subscriptions")]
 

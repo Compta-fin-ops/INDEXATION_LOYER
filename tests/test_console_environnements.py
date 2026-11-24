@@ -229,3 +229,32 @@ def test_sans_coffre_la_console_le_dit(production, monkeypatch):
     page = c.get("/dossiers/HALLES/pennylane").text
     assert "pas de coffre utilisable" in page and "Coller le jeton" not in page
     assert c.post("/dossiers/HALLES/jeton", data={"jeton": "x" * 40}).status_code == 400
+
+
+def test_lister_les_clients_pennylane(production, monkeypatch):
+    """Lecture seule : retrouver l'identifiant du client à porter sur le bail, et voir les baux déjà rattachés."""
+    import io
+    import urllib.error
+    from console import pennylane_api
+    prod, c, _ = production
+    monkeypatch.setenv("PENNYLANE_TOKEN_HALLES", "jeton-de-test-suffisamment-long")
+    appels = []
+
+    def faux(req, timeout=60):
+        appels.append((req.get_method(), req.full_url))
+        return _Reponse({"items": [{"id": 77, "name": "Locataire SARL", "emails": ["compta@locataire.fr"], "reg_no": "123456789"},
+                                   {"id": 78, "first_name": "Anne", "last_name": "Durand"}, {"id": 79}],
+                         "has_more": False, "next_cursor": None})
+
+    monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", faux)
+    page = c.post("/dossiers/HALLES/clients-pennylane").text
+    assert appels == [("GET", "https://app.pennylane.com/api/external/v2/customers?limit=100")]
+    assert "Locataire SARL" in page and "compta@locataire.fr" in page and "Anne Durand" in page and "(sans nom)" in page
+    assert 'href="/baux/1">B01</a>' in page                                    # le bail B01 porte déjà le client 77
+    assert "jeton-de-test" not in page
+
+    def refuse(req, timeout=60):
+        raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, io.BytesIO(b"{}"))
+    monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", refuse)
+    r = c.post("/dossiers/HALLES/clients-pennylane")
+    assert r.status_code == 502 and "403" in r.text and "droit de lecture des clients" in r.text

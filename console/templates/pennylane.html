@@ -25,7 +25,9 @@
   <div class="carte">
     <h2>Tester la connexion</h2>
     <p style="margin-top: 0">Deux lectures, aucune écriture : l'identité du jeton, puis une page d'abonnements. Rien n'est modifié dans Pennylane.</p>
-    {% if source and utilisateur.role != 'lecture' %}<form method="post" action="/dossiers/{{ d.code }}/connexion-pennylane"><button type="submit">Tester la connexion</button></form>
+    {% if source and utilisateur.role != 'lecture' %}<div class="actions" style="margin: 0"><form method="post" action="/dossiers/{{ d.code }}/connexion-pennylane"><button type="submit">Tester la connexion</button></form>
+      <form method="post" action="/dossiers/{{ d.code }}/clients-pennylane"><button type="submit">Lister les clients Pennylane</button></form></div>
+    <p class="discret petit" style="margin: 10px 0 0">La liste des clients donne l'identifiant à inscrire sur chaque bail, champ « Identifiant du client Pennylane ».</p>
     {% elif not source %}<p class="discret petit" style="margin-bottom: 0">Enregistrer d'abord un jeton.</p>{% endif %}
   </div>
 </div>
@@ -44,5 +46,20 @@
   <pre>{{ brut }}</pre>
 </div>{% endif %}
 {% elif b %}<div class="bandeau erreur">{{ b.erreur }}</div>{% endif %}
+{% if clients is not none %}
+<div class="carte">
+  <h2>Clients de ce dossier dans Pennylane</h2>
+  {% if tronquee %}<p class="discret petit" style="margin: 0 0 10px">Liste limitée aux {{ clients | length }} premiers clients.</p>{% endif %}
+  <div class="defile"><table>
+    <thead><tr><th>Identifiant</th><th>Nom</th><th>Courriel</th><th>Immatriculation</th><th>Bail rattaché dans la console</th></tr></thead>
+    <tbody>
+    {% for c in clients %}
+    <tr><td class="fort">{{ c.id }}</td><td>{{ c.nom }}</td><td class="discret">{{ c.courriel or '—' }}</td><td class="discret">{{ c.immatriculation or '—' }}</td>
+      <td>{% for b in rattaches.get(c.id, []) %}<a href="/baux/{{ b.id }}">{{ b.code }}</a> {{ b.locataire }}{% if not loop.last %}, {% endif %}{% else %}<span class="discret">aucun</span>{% endfor %}</td></tr>
+    {% else %}<tr><td colspan="5" class="discret">Aucun client dans ce dossier Pennylane. En créer un dans Pennylane, puis relancer la liste.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endif %}
 <p class="actions"><a class="bouton" href="/dossiers/{{ d.code }}">Retour au dossier</a></p>
 {% endblock %}
