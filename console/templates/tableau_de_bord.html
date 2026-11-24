@@ -2,6 +2,7 @@
 {% block contenu %}
 <h1>Loyers facturés, tous dossiers</h1>
 <p class="sous-titre">{{ s.nb_dossiers }} dossiers, {{ s.nb_baux }} baux. Loyer attendu selon les baux, comparé aux abonnements Pennylane en cours. <a href="/nouveau-dossier">Nouveau dossier</a> · <a href="/import">Importer un fichier Excel ou CSV</a></p>
+{% for code, col in collectes.items() if col.message %}<div class="bandeau erreur">Lecture de Pennylane en échec pour <a href="/dossiers/{{ code }}">{{ code }}</a>, le {{ col.horodatage[:10] | date_fr }} à {{ col.horodatage[11:16] }} : {{ col.message | replace('ÉCHEC : ', '') }}.</div>{% endfor %}
 
 <div class="tuiles">
   <div class="tuile"><div class="libelle">Loyers attendus</div><div class="valeur">{{ s.attendu | eur }}</div><div class="note">par an, hors taxes, charges comprises</div></div>

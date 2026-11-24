@@ -141,7 +141,12 @@ class ClientReel:
                     if e.code == 429 and essai < 3:      # limite d'appels : on attend ce que demande l'API
                         time.sleep(float(e.headers.get("retry-after", 2)))
                         continue
-                    raise RuntimeError(f"Pennylane a répondu {e.code} sur {chemin} ({dossier})") from e
+                    try:                                 # le motif donné par Pennylane aide au premier essai réel
+                        detail = json.loads(e.read().decode("utf-8"))
+                        motif = str(detail.get("error") or detail.get("message") or "")[:200]
+                    except Exception:
+                        motif = ""
+                    raise RuntimeError(f"Pennylane a répondu {e.code} sur {chemin}" + (f" : {motif}" if motif else "")) from e
             lignes = corps.get("items") or corps.get("data") or next(
                 (v for v in corps.values() if isinstance(v, list)), [])
             yield from lignes

@@ -154,7 +154,13 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
                 "utilisateur": getattr(request.state, "utilisateur", None), "ROLES": comptes.LIBELLES_ROLE,
                 "STATUTS": STATUTS_ABONNEMENT, "MODES": MODES, "ecriture_activee": ecriture.ecriture_activee(),
                 "GRAVITE": rp.LIBELLE_GRAVITE, "derniere_synchro": derniere["h"], "simule": simule,
-                "environnement": ENV, **kw}
+                "environnement": ENV, "collectes": collectes(), **kw}
+
+    def collectes() -> dict[str, dict]:
+        """Dernière collecte Pennylane de chaque dossier : date, volumes lus, ou message d'échec."""
+        return {r["dossier"]: dict(r) for r in cx.execute(
+            """SELECT s.* FROM synchros s JOIN (SELECT dossier, MAX(id) AS id FROM synchros GROUP BY dossier) d ON d.id = s.id
+               WHERE s.source='pennylane'""")}
 
     def synthese(an: list[dict]) -> dict:
         ecarts = [e for a in an for e in a["ecarts"]]
@@ -783,9 +789,10 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         return gabarits.TemplateResponse(request, "envoi.html", contexte(request, page="envois", e=dict(e), nom=nom["nom"] if nom else e["dossier"]))
 
     @app.post("/actions/synchroniser")
-    def synchroniser():
+    def synchroniser(request: Request):
         collecter()                                      # dossiers réels seulement ; le fictif n'est jamais relu
-        return RedirectResponse("/", status_code=303)
+        retour = urllib.parse.urlsplit(request.headers.get("referer") or "").path     # on revient d'où l'on vient
+        return RedirectResponse(retour if retour.startswith("/") and not retour.startswith("//") else "/", status_code=303)
 
     @app.get("/api/synthese")
     def api_synthese():

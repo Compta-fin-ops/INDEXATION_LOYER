@@ -5,6 +5,10 @@
 <h1>{{ a.dossier.nom }}</h1>
 <p class="sous-titre">SIREN {{ a.dossier.siren or '—' }} · {{ a.nb_baux }} baux · origine : {{ a.dossier.source_referentiel or '—' }} </p>
 <p class="actions haut"><a class="bouton" href="/dossiers/{{ a.dossier.code }}/baux/nouveau">Nouveau bail</a><a class="bouton" href="/dossiers/{{ a.dossier.code }}/modifier">Modifier le dossier</a>{% if a.dossier.source_referentiel != 'portefeuille fictif' %}<a class="bouton" href="/dossiers/{{ a.dossier.code }}/pennylane">Raccordement Pennylane</a>{% endif %}</p>
+{% set col = collectes.get(a.dossier.code) %}
+{% if col and col.message %}<div class="bandeau erreur">Dernière lecture de Pennylane en échec, le {{ col.horodatage[:10] | date_fr }} à {{ col.horodatage[11:16] }} : {{ col.message | replace('ÉCHEC : ', '') }}. Les abonnements et factures affichés sont ceux de la lecture précédente.</div>
+{% elif col %}<p class="discret petit" style="margin: -8px 0 16px">Dernière lecture de Pennylane le {{ col.horodatage[:10] | date_fr }} à {{ col.horodatage[11:16] }} : {{ col.abonnements }} abonnement(s), {{ col.factures }} facture(s).</p>
+{% elif a.dossier.source_referentiel != 'portefeuille fictif' %}<p class="discret petit" style="margin: -8px 0 16px">Pennylane n'a pas encore été lu pour ce dossier : bouton « Actualiser », en haut à droite, une fois le jeton déposé.</p>{% endif %}
 <div class="tuiles">
   <div class="tuile"><div class="libelle">Loyers attendus</div><div class="valeur">{{ a.attendu_annuel | eur }}</div><div class="note">par an, hors taxes</div></div>
   <div class="tuile"><div class="libelle">Loyers facturés</div><div class="valeur">{{ a.facture_annuel | eur }}</div><div class="note">abonnements en cours</div></div>

@@ -258,3 +258,35 @@ def test_lister_les_clients_pennylane(production, monkeypatch):
     monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", refuse)
     r = c.post("/dossiers/HALLES/clients-pennylane")
     assert r.status_code == 502 and "403" in r.text and "droit de lecture des clients" in r.text
+
+
+def test_resultat_de_la_lecture_de_pennylane_visible(production, monkeypatch):
+    """Après « Actualiser », la page du dossier dit ce qui a été lu, ou pourquoi la lecture a échoué."""
+    import io
+    import urllib.error
+    from console import pennylane_api
+    prod, c, _ = production
+    assert "pas encore été lu" in c.get("/dossiers/HALLES").text
+    monkeypatch.setenv("PENNYLANE_TOKEN_HALLES", "jeton-de-test-suffisamment-long")
+    monkeypatch.setattr(pennylane_api.time, "sleep", lambda s: None)
+
+    def refuse(req, timeout=60):
+        raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, io.BytesIO(
+            b'{"error": "Access to this resource requires scope customer_invoices", "status": 403}'))
+    monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", lambda req, timeout=60: _Reponse(
+        {"items": [], "has_more": False, "next_cursor": None}) if "billing_subscriptions" in req.full_url else refuse(req))
+    r = c.post("/actions/synchroniser", headers={"referer": "http://testserver/dossiers/HALLES"}, follow_redirects=False)
+    assert r.headers["location"] == "/dossiers/HALLES"                       # retour à la page d'où l'on a cliqué
+    page = c.get("/dossiers/HALLES").text
+    assert "en échec" in page and "403 sur /customer_invoices" in page and "requires scope customer_invoices" in page
+    assert "Lecture de Pennylane en échec pour" in c.get("/").text
+    abonnement = {"id": 501, "status": "in_progress", "mode": "awaiting_validation", "start": "2026-01-01", "finish": None,
+                  "next_occurrence": "2026-12-01", "prev_occurrence": "2026-11-01", "label": "Loyer", "customer": {"id": 77, "url": "x"},
+                  "recurring_rule": {"rule_type": "monthly", "interval": 1, "count": None},
+                  "customer_invoice_data": {"currency_amount_before_tax": "1000.00"}}
+    monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", lambda req, timeout=60: _Reponse(
+        {"items": [abonnement] if "billing_subscriptions" in req.full_url else [], "has_more": False, "next_cursor": None}))
+    c.post("/actions/synchroniser")
+    page = c.get("/dossiers/HALLES").text
+    assert "1 abonnement(s), 0 facture(s)" in page and "en échec" not in page
+    assert "n° 501" in c.get("/baux/1").text                                 # l'abonnement lu est rattaché au bail du client 77
