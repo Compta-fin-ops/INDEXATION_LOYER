@@ -112,3 +112,63 @@ def test_preparer_test_est_idempotent(production, tmp_path, capsys):
     absente, vide = tmp_path / "ailleurs" / "cabinet.sqlite", tmp_path / "ailleurs" / "test" / "test.sqlite"
     assert main(["--base", str(absente), "preparer-test", "--vers", str(vide)]) == 0
     assert db.environnement(db.connecter(vide)) == "test" and not absente.exists()
+
+
+class _Reponse:
+    status = 200
+
+    def __init__(self, corps):
+        self.corps = corps
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        import json
+        return json.dumps(self.corps).encode()
+
+
+def test_tester_la_connexion_pennylane_lecture_seule(production, monkeypatch):
+    import io
+    import urllib.error
+    from console import pennylane_api
+    prod, c, _ = production
+    # sans jeton sur le poste : aucun appel, et la marche à suivre
+    monkeypatch.delenv("PENNYLANE_TOKEN_HALLES", raising=False)
+    monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", lambda *a, **k: pytest.fail("appel sans jeton"))
+    page = c.post("/dossiers/HALLES/connexion-pennylane").text
+    assert "PENNYLANE_TOKEN_HALLES" in page and "variables d" in page
+    # jeton d'un environnement de test : deux lectures GET, la marque Sandbox est reconnue, le jeton n'est jamais affiché
+    appels = []
+
+    def faux(req, timeout=30):
+        appels.append((req.get_method(), req.full_url, req.get_header("Authorization")))
+        if req.full_url.endswith("/me"):
+            return _Reponse({"user": {"id": 7, "email": "moi@exemple.fr"}, "company": {"id": 99, "name": "Sandbox - moi@exemple.fr"}})
+        return _Reponse({"items": [], "has_more": False, "next_cursor": None})
+
+    monkeypatch.setenv("PENNYLANE_TOKEN_HALLES", "jeton-secret-de-test")
+    monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", faux)
+    page = c.post("/dossiers/HALLES/connexion-pennylane").text
+    assert [m for m, _, _ in appels] == ["GET", "GET"] and all(a == "Bearer jeton-secret-de-test" for _, _, a in appels)
+    assert appels[0][1].endswith("/api/external/v2/me") and "/billing_subscriptions?limit=1" in appels[1][1]
+    assert "jeton-secret-de-test" not in page and "company.name = Sandbox - moi@exemple.fr" in page
+    assert "Reconnu" in page and "Possible" in page
+    # dossier réel : aucune marque, la console le dit
+    monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", lambda req, timeout=30: _Reponse(
+        {"company": {"id": 5, "name": "SCI des Halles"}} if req.full_url.endswith("/me") else {"items": []}))
+    assert "à considérer comme celui d" in c.post("/dossiers/HALLES/connexion-pennylane").text
+    # jeton refusé : l'échec est affiché, rien ne plante
+    def refuse(req, timeout=30):
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, io.BytesIO(b'{"error": "The access token is invalid", "status": 401}'))
+    monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", refuse)
+    page = c.post("/dossiers/HALLES/connexion-pennylane").text
+    assert "HTTP 401" in page and "The access token is invalid" in page and "refuse le jeton" in page
+    assert pennylane_api.marques_sandbox({"a": [{"n": "sandbox-123"}], "b": "Bac à sable", "c": 3}) == ["a[0].n = sandbox-123"]
+    h = [r["detail"] for r in db.connecter(prod).execute("SELECT detail FROM historique WHERE action='Connexion Pennylane testée'")]
+    assert len(h) == 4 and "environnement de test reconnu" in h[1] and "jeton-secret" not in " ".join(h)
+    lecteur = client_connecte(creer_app(prod, AUJ), prod, "lecture")
+    assert lecteur.post("/dossiers/HALLES/connexion-pennylane").status_code == 403
