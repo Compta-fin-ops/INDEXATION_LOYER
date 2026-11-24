@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block titre %}Courriers de réindexation · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="fil"><a href="/">Tableau de bord</a> / Courriers de réindexation</div>
+<h1>Courriers de réindexation à éditer</h1>
+<p class="sous-titre">Les révisions dont l'indice est publié, ou le gel décidé, sous {{ horizon }} jours, et dont le courrier n'est pas encore daté comme envoyé.</p>
+{% if message %}<div class="bandeau succes">{{ message }}</div>{% endif %}
+<form method="get" action="/courriers" class="filtres">
+  <label>Dossier<select name="dossier"><option value="">Tous</option>{% for code, nom in noms.items() %}<option value="{{ code }}"{{ ' selected' if code == dossier }}>{{ nom }}</option>{% endfor %}</select></label>
+  <label>Horizon<select name="horizon">{% for h in (60, 90, 180, 365) %}<option value="{{ h }}"{{ ' selected' if h == horizon }}>{{ h }} jours</option>{% endfor %}</select></label>
+  <button type="submit">Afficher</button>
+</form>
+{% if lignes %}
+<form method="post" action="/courriers" class="carte">
+  <input type="hidden" name="horizon" value="{{ horizon }}"><input type="hidden" name="dossier" value="{{ dossier }}">
+  <h2>{{ lignes | length }} courrier(s)</h2>
+  <div class="defile"><table>
+    <thead><tr><th></th><th>Révision</th><th>Dossier</th><th>Bail</th><th>Nature</th><th class="num">Loyer avant</th><th class="num">Loyer après</th><th>Courrier</th></tr></thead>
+    <tbody>
+    {% for l in lignes %}
+    <tr>
+      <td><input type="checkbox" name="revision" value="{{ l.bail.id }}:{{ l.numero }}" checked aria-label="Dater ce courrier"></td>
+      <td>{{ l.date | date_fr }}<div class="discret petit">dans {{ l.jours }} j</div></td>
+      <td>{{ l.dossier.nom }}</td>
+      <td><a class="fort" href="/baux/{{ l.bail.id }}">{{ l.bail.code }}</a> {{ l.bail.locataire }}</td>
+      <td>{% if l.gel %}<span class="pastille info">Gel</span>{% else %}<span class="pastille ok">Révision</span>{% endif %} <span class="discret petit">{{ l.indice }}</span></td>
+      <td class="num">{{ l.avant | eur2 }}</td>
+      <td class="num fort">{{ (l.avant if l.gel else l.apres) | eur2 }}</td>
+      <td><a href="/baux/{{ l.bail.id }}/revisions/{{ l.numero }}/courrier.pdf">voir le PDF</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="actions"><a class="bouton" href="/courriers/lot.zip?horizon={{ horizon }}&amp;dossier={{ dossier }}">1. Télécharger les {{ lignes | length }} courriers (ZIP)</a></p>
+  <div class="confirmation" style="margin-top: 14px">
+    <label>2. Une fois envoyés, dater les courriers cochés<input type="date" name="envoye_le" value="{{ aujourdhui.isoformat() }}" required style="width: 170px"></label>
+    <button type="submit">Dater comme envoyés</button>
+  </div>
+  <p class="discret petit" style="margin: 10px 0 0">Le ZIP contient un PDF par locataire, nommé avec le dossier, le bail et la date de révision. La console n'envoie rien : elle édite, et vous notez la date d'envoi. Décocher une ligne la laisse dans la liste.</p>
+</form>
+{% else %}<div class="carte"><p class="discret" style="margin: 0">Aucun courrier à éditer sous {{ horizon }} jours{% if dossier %} pour ce dossier{% endif %}.</p></div>{% endif %}
+{% endblock %}

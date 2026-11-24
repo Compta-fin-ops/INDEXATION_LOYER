@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
 import re
 import sqlite3
 import tempfile
 import urllib.parse
+import zipfile
 from datetime import date, datetime
 from pathlib import Path
 
@@ -26,7 +28,7 @@ from fastapi.templating import Jinja2Templates
 from indexation_loyer import calcul
 from indexation_loyer.baux import DECISIONS, INDICES, METHODES, PERIODICITES_FACTURATION, TYPES_BAIL, est_gel
 
-from . import (__version__, comptes, db, depot, ecriture, import_tableur, jetons, pieces, rapprochement as rp,
+from . import (__version__, comptes, db, depot, ecriture, editions, import_tableur, jetons, pieces, rapprochement as rp,
                referentiel, simulation)
 
 ICI = Path(__file__).resolve().parent
@@ -645,11 +647,10 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         referentiel.enregistrer_decision(cx, b, numero, decision, champs.get("commentaire", "").strip(), courrier_le)
         return retour_bail(bail_id, message=f"Révision n° {numero} : décision enregistrée.")
 
-    @app.get("/baux/{bail_id}/revisions/{numero}/courrier.pdf")
-    def revision_courrier(bail_id: int, numero: int):
+    def pdf_courrier(b: dict, numero: int) -> tuple[str, bytes, object]:
+        """(nom du fichier, contenu, ligne de révision) du courrier d'une révision. Lève HTTPException s'il n'y a rien à notifier."""
         from indexation_loyer import courriers
         from indexation_loyer.workbook import Societe
-        b = ligne_bail(bail_id)
         if not b["calcule"]:
             raise HTTPException(409, "Bail non calculé par la console : compléter ses paramètres.")
         _, lignes, _ = revisions(b)
@@ -666,11 +667,89 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         with tempfile.TemporaryDirectory() as tmp:
             contenu = courriers.generer_un(societe, bail_m, l, Path(tmp) / "courrier.pdf", aujourdhui=jour()).read_bytes()
         nature = "gel" if est_gel(l.decision) else "attente" if l.loyer_retenu is None else "revision"
-        nom = f"{b['dossier']}_{b['code']}_{l.echeance.date_revision:%Y-%m-%d}_{nature}.pdf"
-        referentiel.tracer(cx, "Courrier généré", f"révision n° {numero} du {l.echeance.date_revision:%d/%m/%Y} ({nature})",
-                           b["dossier"], bail_id)
+        locataire = "".join(c if c.isalnum() else "_" for c in b["locataire"]).strip("_")[:30]
+        return f"{b['dossier']}_{b['code']}_{locataire}_{l.echeance.date_revision:%Y-%m-%d}_{nature}.pdf", contenu, l
+
+    @app.get("/baux/{bail_id}/revisions/{numero}/courrier.pdf")
+    def revision_courrier(bail_id: int, numero: int):
+        b = ligne_bail(bail_id)
+        nom, contenu, l = pdf_courrier(b, numero)
+        referentiel.tracer(cx, "Courrier généré", f"révision n° {numero} du {l.echeance.date_revision:%d/%m/%Y}", b["dossier"], bail_id)
         cx.commit()
         return Response(contenu, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{nom}"'})
+
+    # --------------------------------------------------------- courriers en lot
+    def courriers_a_editer(horizon: int, dossier: str = "") -> list[dict]:
+        """Révisions « à préparer » dont le courrier n'est pas encore daté comme envoyé."""
+        return [l for l in pilotage(analyses(dossier or None), horizon)
+                if l["etat"] == "a_faire" and not l["courrier_le"] and l["numero"] is not None]
+
+    @app.get("/courriers", response_class=HTMLResponse)
+    def courriers_lot(request: Request, horizon: int = 90, dossier: str = "", message: str = ""):
+        horizon = min(max(horizon, 30), 730)
+        return gabarits.TemplateResponse(request, "courriers.html", contexte(
+            request, page="bord", lignes=courriers_a_editer(horizon, dossier), horizon=horizon, dossier=dossier, message=message,
+            noms={r["code"]: r["nom"] for r in cx.execute("SELECT code, nom FROM dossiers ORDER BY nom")}))
+
+    @app.get("/courriers/lot.zip")
+    def courriers_lot_zip(horizon: int = 90, dossier: str = ""):
+        lignes = courriers_a_editer(min(max(horizon, 30), 730), dossier)
+        if not lignes:
+            raise HTTPException(404, "Aucun courrier à éditer.")
+        tampon = io.BytesIO()
+        with zipfile.ZipFile(tampon, "w", zipfile.ZIP_DEFLATED) as archive:
+            for l in lignes:
+                nom, contenu, _ = pdf_courrier(ligne_bail(l["bail"]["id"]), l["numero"])
+                archive.writestr(nom, contenu)
+        referentiel.tracer(cx, "Courriers édités en lot", f"{len(lignes)} courrier(s)" + (f" · dossier {dossier}" if dossier else ""), dossier)
+        cx.commit()
+        return Response(tampon.getvalue(), media_type="application/zip", headers={
+            "Content-Disposition": f'attachment; filename="courriers_reindexation_{jour():%Y-%m-%d}.zip"'})
+
+    @app.post("/courriers")
+    async def courriers_dater(request: Request):
+        """Date comme envoyés les courriers cochés : la décision et le commentaire de chaque révision sont conservés."""
+        form = await request.form()
+        erreurs: list[str] = []
+        envoye_le = referentiel._date(str(form.get("envoye_le") or ""), "date_effet", erreurs)
+        retour = "/courriers?" + urllib.parse.urlencode({"horizon": form.get("horizon") or 90, "dossier": form.get("dossier") or ""})
+        if erreurs or not envoye_le:
+            return RedirectResponse(retour + "&" + urllib.parse.urlencode({"message": "Date d'envoi illisible : rien n'a été modifié."}), status_code=303)
+        n = 0
+        for cle in form.getlist("revision"):
+            try:
+                bail_id, numero = (int(x) for x in str(cle).split(":"))
+            except ValueError:
+                continue
+            b = cx.execute("SELECT * FROM baux WHERE id=?", (bail_id,)).fetchone()
+            if b is None or not b["calcule"]:
+                continue
+            d = referentiel.decisions_du_bail(cx, bail_id).get(numero, {})
+            referentiel.enregistrer_decision(cx, dict(b), numero, d.get("decision") or DECISIONS[0], d.get("commentaire") or "", envoye_le)
+            n += 1
+        return RedirectResponse(retour + "&" + urllib.parse.urlencode({"message": f"{n} courrier(s) daté(s) comme envoyé(s)."}), status_code=303)
+
+    # ---------------------------------------------------- état annuel des révisions
+    @app.get("/dossiers/{code}/etat-revisions.pdf")
+    def etat_revisions(code: str, annee: int | None = None):
+        d = dossier_ou_404(code)
+        annee = annee or jour().year
+        if not 2000 <= annee <= jour().year + 1:
+            raise HTTPException(400, "Année hors limites.")
+        table, baux = table_indices(), []
+        for b in map(dict, cx.execute("SELECT * FROM baux WHERE dossier=? AND calcule=1 AND date_effet IS NOT NULL ORDER BY code", (code,)).fetchall()):
+            if (b.get("date_sortie") and str(b["date_sortie"])[:4] < str(annee)) or str(b["reprise_date"] or b["date_effet"])[:4] > str(annee):
+                continue                                 # sorti avant l'année, ou pas encore en vigueur
+            dec = referentiel.decisions_du_bail(cx, b["id"])
+            _, revs = referentiel.reviser(b, table, {n: x["decision"] for n, x in dec.items()}, max(jour(), date(annee, 12, 31)))
+            baux.append({"bail": b, "revisions": revs, "decisions": dec})
+        if not baux:
+            raise HTTPException(404, "Aucun bail calculé par la console pour cette année.")
+        contenu = editions.etat_annuel(d, baux, annee, jour(), fictif=d["source_referentiel"] == FICTIF)
+        referentiel.tracer(cx, "État annuel des révisions édité", f"année {annee} · {len(baux)} bail/baux", code)
+        cx.commit()
+        return Response(contenu, media_type="application/pdf", headers={
+            "Content-Disposition": f'inline; filename="{code}_revisions_{annee}.pdf"'})
 
     @app.post("/baux/{bail_id}/pieces")
     async def piece_deposer(request: Request, bail_id: int):

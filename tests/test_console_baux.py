@@ -91,7 +91,7 @@ def test_courrier_pdf_de_revision(console):
     c, cx, bail_id, _ = console
     r = c.get(f"/baux/{bail_id}/revisions/3/courrier.pdf")
     assert r.status_code == 200 and r.headers["content-type"] == "application/pdf" and r.content.startswith(b"%PDF")
-    assert "HALLES_B01_2026-04-01_revision.pdf" in r.headers["content-disposition"]
+    assert "HALLES_B01_Boulangerie_Martin_2026-04-01_revision.pdf" in r.headers["content-disposition"]
     assert c.get(f"/baux/{bail_id}/revisions/4/courrier.pdf").status_code == 409           # 2027 : indice non publié, rien à dire
     assert c.get(f"/baux/{bail_id}/revisions/99/courrier.pdf").status_code == 404
     assert cx.execute("SELECT COUNT(*) AS n FROM historique WHERE action='Courrier généré'").fetchone()["n"] == 1
@@ -392,3 +392,52 @@ def test_tableau_de_bord_pilote_les_reindexations(console, indices):
     c.post(f"/baux/{bail_id}/revisions/4", data={"decision": "Geler – sans rattrapage", "commentaire": "accord 2027"})
     page = c.get("/?horizon=180").text
     assert "Gel décidé" in page and "À préparer" in page and "accord 2027" in page
+
+
+def test_courriers_en_lot_et_etat_annuel(console, indices):
+    """Tous les courriers « à préparer » en un ZIP, datés comme envoyés d'un geste ; état annuel des révisions en PDF."""
+    import io
+    import zipfile
+    c, cx, bail_id, _ = console
+    c.post("/dossiers/HALLES/baux", data={**BAIL, "code": "B02", "locataire": "Opticien Durand", "loyer_initial_annuel": "12000"})
+    assert "Aucun courrier à éditer" in c.get("/courriers?horizon=180").text     # indice 2026-T4 non publié : rien à dire
+    assert c.get("/courriers/lot.zip?horizon=180").status_code == 404
+    insee.ecrire_cache([insee.Observation("ILC", "001532540", t, v, "A", "2026-12-20", "TEST", "2026-12-21")
+                        for t, v in {**ILC, "2026-T4": 139.00}.items()], indices)
+    c.post(f"/baux/{bail_id}/revisions/4", data={"decision": "Geler – sans rattrapage", "commentaire": "accord du bailleur"})
+    page = c.get("/courriers?horizon=180").text
+    assert "2 courrier(s)" in page and "Opticien Durand" in page and "Gel" in page
+    r = c.get("/courriers/lot.zip?horizon=180")
+    assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
+    noms = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert noms == ["HALLES_B01_Boulangerie_Martin_2027-04-01_gel.pdf", "HALLES_B02_Opticien_Durand_2027-04-01_revision.pdf"]
+    assert all(zipfile.ZipFile(io.BytesIO(r.content)).read(n).startswith(b"%PDF") for n in noms)
+    # on date seulement le courrier coché ; la décision de gel et son commentaire sont conservés
+    r = c.post("/courriers", data={"horizon": "180", "dossier": "", "envoye_le": "2026-12-22", "revision": [f"{bail_id}:4"]}, follow_redirects=False)
+    assert r.status_code == 303 and "1+courrier" in r.headers["location"]
+    d = cx.execute("SELECT * FROM decisions WHERE bail_id=? AND numero=4", (bail_id,)).fetchone()
+    assert (d["decision"], d["commentaire"], d["courrier_le"]) == ("Geler – sans rattrapage", "accord du bailleur", "2026-12-22")
+    page = c.get("/courriers?horizon=180").text
+    assert "1 courrier(s)" in page and "Boulangerie Martin" not in page
+    assert "illisible" in c.post("/courriers", data={"envoye_le": "demain", "revision": ["2:4"]}, follow_redirects=False).headers["location"]
+    assert c.get("/courriers?dossier=HALLES&horizon=180").status_code == 200
+    # état annuel : une ligne par bail, la révision de l'année et la suite donnée
+    from console import editions, referentiel
+    from indexation_loyer import calcul
+    r = c.get("/dossiers/HALLES/etat-revisions.pdf?annee=2026")
+    assert r.status_code == 200 and r.content.startswith(b"%PDF") and "HALLES_revisions_2026.pdf" in r.headers["content-disposition"]
+    assert c.get("/dossiers/HALLES/etat-revisions.pdf?annee=1990").status_code == 400
+    assert c.get("/dossiers/HALLES/etat-revisions.pdf?annee=2022").status_code == 404          # aucun bail en vigueur cette année-là
+    table = calcul.table_indices(referentiel.lire_indices(indices))
+    baux = []
+    for b in map(dict, cx.execute("SELECT * FROM baux ORDER BY code").fetchall()):
+        dec = referentiel.decisions_du_bail(cx, b["id"])
+        baux.append({"bail": b, "decisions": dec,
+                     "revisions": referentiel.reviser(b, table, {n: x["decision"] for n, x in dec.items()}, date(2027, 12, 31))[1]})
+    e26, e27 = editions.lignes_etat(baux, 2026, AUJ), editions.lignes_etat(baux, 2027, date(2027, 12, 31))
+    assert editions.lignes_etat(baux, 2027, AUJ)[1]["nature"] == "À venir, indice publié"      # vue du 22/11/2026
+    assert [(x["bail"]["code"], x["nature"]) for x in e26] == [("B01", "Appliquée"), ("B02", "Appliquée")]
+    assert e26[0]["loyer_debut"] == pytest.approx(25761.21, abs=0.01) and e26[0]["loyer_fin"] == pytest.approx(26140.11, abs=0.01)
+    assert e27[0]["nature"] == "Gelée, sans rattrapage" and e27[0]["commentaire"] == "accord du bailleur" and e27[0]["courrier_le"] == "2026-12-22"
+    assert e27[0]["loyer_fin"] == pytest.approx(26140.11, abs=0.01)                               # gelé : loyer maintenu
+    assert e27[1]["nature"] == "Appliquée" and e27[1]["loyer_fin"] == pytest.approx(13070.06 * 139.00 / 137.29, abs=0.02)

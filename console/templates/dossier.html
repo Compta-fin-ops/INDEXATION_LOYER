@@ -36,5 +36,11 @@
     </tbody>
   </table></div>
 </div>
+<div class="carte">
+  <h2>Éditions</h2>
+  <p style="margin: 0">État annuel des révisions de loyer, à remettre au bailleur :
+    {% for an in (aujourdhui.year, aujourdhui.year - 1) %}<a class="fort" href="/dossiers/{{ a.dossier.code }}/etat-revisions.pdf?annee={{ an }}">{{ an }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+    · <a href="/courriers?dossier={{ a.dossier.code }}">courriers de réindexation à éditer</a></p>
+</div>
 <div class="carte"><h2>Écarts du dossier</h2>{{ E.lignes(a.ecarts, avec_dossier=False) }}</div>
 {% endblock %}
