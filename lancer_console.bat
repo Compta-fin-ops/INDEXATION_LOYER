@@ -21,7 +21,14 @@ if not exist ".venv\Scripts\python.exe" (
   echo Preparation de l'environnement, une seule fois...
   %PY% -m venv .venv || goto :erreur
   ".venv\Scripts\python.exe" -m pip install --upgrade pip >nul
+)
+
+rem Composants : installes au premier lancement, puis seulement si une mise a jour en demande de nouveaux
+fc /b requirements.txt ".venv\requirements.installees.txt" >nul 2>nul
+if errorlevel 1 (
+  echo Installation des composants, quelques minutes la premiere fois...
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto :erreur
+  copy /y requirements.txt ".venv\requirements.installees.txt" >nul
 )
 
 set BASE=data\cabinet.sqlite

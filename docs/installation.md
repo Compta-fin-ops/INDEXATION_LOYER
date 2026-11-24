@@ -90,6 +90,22 @@ Le script sauvegarde la base avant de commencer et refuse d'agir en cas de doute
 
 > Comme le lanceur, `mettre_a_jour.bat` n'a pas pu être essayé sur Windows.
 
+### Trois façons d'obtenir Git
+
+| Voie | Pour qui | Mise à jour ensuite |
+|---|---|---|
+| Installateur de git-scm.com | Voie décrite ci-dessus | Double-clic sur `mettre_a_jour.bat` |
+| Une commande dans PowerShell : `winget install --id Git.Git -e` | Évite le site et l'assistant d'installation ; demande Windows 10 ou 11 à jour | Double-clic sur `mettre_a_jour.bat` |
+| GitHub Desktop, depuis <https://desktop.github.com> | Aucune ligne de commande, tout à la souris | Dans l'application : « Fetch origin », puis « Pull origin » |
+
+Avec GitHub Desktop : se connecter avec son compte GitHub, menu « File », « Clone repository », choisir
+`INDEXATION_LOYER` et un dossier dans `Documents`, puis sélectionner la branche
+`claude/suivi-reindexations-loyers-ag5rbc` dans « Current Branch ». Reprendre ensuite les données comme à
+l'étape 4 ci-dessus. `mettre_a_jour.bat` ne fonctionne pas avec cette voie : GitHub Desktop garde son propre Git.
+
+Quelle que soit la voie, `lancer_console.bat` installe de lui-même les composants qu'une nouvelle version
+réclamerait : après une mise à jour, il suffit de le relancer.
+
 ## 4. Se connecter, puis créer les autres comptes
 
 1. Saisir l'identifiant et le mot de passe créés à l'étape 3.
