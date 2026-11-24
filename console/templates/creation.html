@@ -43,7 +43,7 @@
     <input type="hidden" name="empreinte" value="{{ empreinte }}">
     <label>Pour confirmer, saisir le code du bail <span class="fort">{{ sit.bail.code }}</span>
       <input type="text" name="confirmation" autocomplete="off" required></label>
-    <button type="submit" class="principal">{{ 'Simuler la création' if simule else 'Créer l’abonnement dans Pennylane' }}</button>
+    <button type="submit" class="principal">{{ 'Simuler la création' if sans_appel else 'Créer l’abonnement dans Pennylane' }}</button>
     <a href="/baux/{{ sit.bail.id }}">Annuler</a>
   </form>
   {% else %}

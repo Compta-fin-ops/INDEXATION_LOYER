@@ -92,6 +92,14 @@ python -m console importer suivi/SCI_DES_HALLES_indexation_loyers.xlsx --dossier
 Opération de migration, une fois par société : les baux, leurs paramètres, les gels et leurs commentaires passent
 dans la console. Le classeur n'est plus relu ensuite.
 
+### Production et test
+
+Une base porte sa nature, production ou test. La base de test se crée par copie de la production
+(`python -m console copier-vers-test`, ou `lancer_console_test.bat` sur Windows), s'affiche avec un ruban sur
+toutes les pages, a ses propres sessions, et simule toute création d'abonnement : aucune écriture ne part vers
+Pennylane depuis une base de test, même écriture activée et jeton présent. Détail dans
+[installation.md](installation.md).
+
 ### Sauvegarder
 
 La base est désormais la source de vérité. `python -m console sauvegarder` en fait une copie horodatée dans
@@ -156,6 +164,7 @@ par échéance est le plus proche.
 | Verrous de la création d'abonnement, réponse perdue, refus de Pennylane | Testés contre un faux Pennylane, 9 tests |
 | Saisie d'un bail, calcul, gel, courrier PDF, pièces jointes, historique, sauvegarde | Testés, 11 tests |
 | Import en lot : modèle, aperçu, confirmation, tout ou rien, fichiers refusés | Testé, et parcours vérifié dans un navigateur |
+| Base de test : copie, marquage, sessions distinctes, aucune écriture vers Pennylane | Testé, 4 tests |
 | Comptes, rôles, session, blocage après échecs, mot de passe provisoire | Testés, 7 tests, et parcours vérifié dans un navigateur |
 | Lanceur `lancer_console.bat` et notice Windows | **Non essayés sur Windows** |
 | Reprise d'un ancien classeur | Testée : la console retrouve les loyers du classeur de démonstration |

@@ -56,7 +56,7 @@ def _date_fr(v) -> str:
 
 
 FICTIF = "portefeuille fictif"
-TEMOIN = "console_session"
+TEMOIN_BASE = "console_session"
 LIBRES = ("/connexion",)                     # seules pages servies sans session
 RE_VARIABLE_JETON = re.compile(r"^PENNYLANE_TOKEN_[A-Z0-9_]+$")
 
@@ -72,6 +72,8 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
                                 pct=lambda x: f"{x * 100:.0f} %".replace(".", ","))
     cx = db.connecter(chemin_db)
     jour = lambda: aujourdhui or date.today()
+    ENV = db.environnement(cx)                           # production | test, inscrit dans la base
+    TEMOIN = TEMOIN_BASE + ("_test" if ENV == "test" else "")    # deux consoles sur le même poste : deux sessions distinctes
 
     verrous: dict = {}
 
@@ -137,6 +139,10 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         r = cx.execute("SELECT source_referentiel FROM dossiers WHERE code=?", (code,)).fetchone()
         return r is not None and r["source_referentiel"] == FICTIF
 
+    def sans_appel(code: str) -> bool:
+        """Création d'abonnement simulée, sans aucun appel : dossier fictif, ou base de test quelle que soit la société."""
+        return ENV == "test" or est_fictif(code)
+
     async def formulaire(request: Request) -> dict[str, str]:
         return {k: v for k, v in (await request.form()).items() if isinstance(v, str)}
 
@@ -146,7 +152,8 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         return {"request": request, "version": __version__, "aujourdhui": jour(), "TYPES": TYPES,
                 "utilisateur": getattr(request.state, "utilisateur", None), "ROLES": comptes.LIBELLES_ROLE,
                 "STATUTS": STATUTS_ABONNEMENT, "MODES": MODES, "ecriture_activee": ecriture.ecriture_activee(),
-                "GRAVITE": rp.LIBELLE_GRAVITE, "derniere_synchro": derniere["h"], "simule": simule, **kw}
+                "GRAVITE": rp.LIBELLE_GRAVITE, "derniere_synchro": derniere["h"], "simule": simule,
+                "environnement": ENV, **kw}
 
     def synthese(an: list[dict]) -> dict:
         ecarts = [e for a in an for e in a["ecarts"]]
@@ -637,7 +644,7 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         prop = rp.proposer_abonnement(sit.bail, sit.courant, jour())
         prop["corps"] = ecriture.imposer_brouillon(prop["corps"])
         controles = ecriture.controler(sit, prop, a["dossier"], ecriture.journal(cx, a["dossier"]["code"]), jour(),
-                                      a["dossier"]["source_referentiel"] == FICTIF)
+                                      sans_appel(a["dossier"]["code"]))
         return a, sit, prop, controles
 
     def page_creation(request: Request, bail_id: int, erreur: str = "", statut: int = 200):
@@ -645,6 +652,7 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         return gabarits.TemplateResponse(request, "creation.html", contexte(
             request, page="bord", a=a, sit=sit, prop=prop, controles=controles, erreur=erreur,
             possible=ecriture.envoi_possible(controles), empreinte=ecriture.empreinte(prop["corps"]),
+            sans_appel=sans_appel(a["dossier"]["code"]),
             corps=json.dumps(prop["corps"], ensure_ascii=False, indent=2)), status_code=statut)
 
     @app.get("/baux/{bail_id}/abonnement", response_class=HTMLResponse)
@@ -655,7 +663,7 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
     async def creer(request: Request, bail_id: int):
         champs = {k: v[0] for k, v in urllib.parse.parse_qs((await request.body()).decode("utf-8")).items()}
         code_dossier = ligne_bail(bail_id)["dossier"]
-        simule = est_fictif(code_dossier)                # un dossier fictif ne déclenche jamais d'appel
+        simule = sans_appel(code_dossier)                # dossier fictif ou base de test : jamais d'appel
         if not simule:                                   # relecture de Pennylane juste avant d'écrire
             if not all(x["ok"] for x in collecter(code_dossier)):
                 return page_creation(request, bail_id, "Relecture de Pennylane impossible : aucun envoi sans état à jour.", 409)

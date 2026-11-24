@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block titre %}Console des loyers{% endblock %}</title>
+<title>{% if environnement == 'test' %}[TEST] {% endif %}{% block titre %}Console des loyers{% endblock %}</title>
 <link rel="stylesheet" href="/static/console.css">
 </head>
-<body>
+<body class="{{ 'env-test' if environnement == 'test' }}">
+{% if environnement == 'test' %}<div class="ruban-test">Base de test · les saisies faites ici ne touchent ni les dossiers du cabinet ni Pennylane</div>{% endif %}
 <header class="entete"><div class="entete-int">
-  <a class="marque" href="/">Console des loyers</a>
+  <a class="marque" href="/">Console des loyers{% if environnement == 'test' %} <span class="pastille test">TEST</span>{% endif %}</a>
   {% if utilisateur %}<nav>
     <a href="/" class="{{ 'actif' if page == 'bord' }}">Tableau de bord</a>
     <a href="/ecarts" class="{{ 'actif' if page == 'ecarts' }}">Écarts</a>
@@ -27,7 +28,7 @@
 <main>
 {% if simule and utilisateur %}<div class="bandeau">Données simulées : portefeuille fictif de démonstration, aucun appel à Pennylane.</div>{% endif %}
 {% block contenu %}{% endblock %}
-<footer>Console des loyers v{{ version }} · {% if simule %}mode simulation, aucun appel à Pennylane{% elif ecriture_activee %}écriture activée sur ce poste : création d'abonnements uniquement, factures en brouillon{% else %}lecture seule de Pennylane{% endif %} · la console ne modifie ni ne supprime jamais rien.</footer>
+<footer>Console des loyers v{{ version }} · {% if environnement == 'production' %}base de production · {% endif %}{% if environnement == 'test' %}base de test : aucune écriture vers Pennylane, les créations d'abonnement sont simulées{% elif simule %}mode simulation, aucun appel à Pennylane{% elif ecriture_activee %}écriture activée sur ce poste : création d'abonnements uniquement, factures en brouillon{% else %}lecture seule de Pennylane{% endif %} · la console ne modifie ni ne supprime jamais rien.</footer>
 </main>
 </body>
 </html>

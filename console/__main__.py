@@ -6,6 +6,9 @@
                                                  reprise d'un ancien classeur Excel, une fois par société
     python -m console synchroniser               collecte Pennylane en lecture seule
     python -m console sauvegarder                copie horodatée de la base dans data/sauvegardes
+    python -m console environnement [test|production]          affiche ou fixe la nature de la base
+    python -m console copier-vers-test --vers data/test/test.sqlite [--remplacer]
+                                                 copie la base de production vers une base de test
     python -m console utilisateur creer          crée un compte (le premier : un administrateur)
     python -m console utilisateur lister
     python -m console utilisateur mot-de-passe IDENTIFIANT     attribue un nouveau mot de passe
@@ -36,6 +39,13 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_parser("synchroniser", help="Collecte les abonnements et factures dans Pennylane (lecture seule)")
     sv = sp.add_parser("sauvegarder", help="Copie horodatée de la base")
     sv.add_argument("--vers", default=str(db.RACINE / "data" / "sauvegardes"))
+    en = sp.add_parser("environnement", help="Affiche ou fixe la nature de la base : production ou test")
+    en.add_argument("valeur", nargs="?", choices=db.ENVIRONNEMENTS)
+    ct = sp.add_parser("copier-vers-test", help="Copie la base de production (--base) vers une base de test")
+    ct.add_argument("--vers", default=str(db.RACINE / "data" / "test" / "test.sqlite"))
+    ct.add_argument("--remplacer", action="store_true", help="Remplace une base de test existante")
+    pt = sp.add_parser("preparer-test", help="Crée la base de test si elle manque : copie de la production, sinon base vide")
+    pt.add_argument("--vers", default=str(db.RACINE / "data" / "test" / "test.sqlite"))
     u = sp.add_parser("utilisateur", help="Comptes de la console")
     u.add_argument("action", choices=("creer", "lister", "mot-de-passe"))
     u.add_argument("identifiant", nargs="?")
@@ -48,7 +58,10 @@ def main(argv: list[str] | None = None) -> int:
     for flux in (sys.stdout, sys.stderr):                # console Windows : pas d'erreur sur un caractère non affichable
         if hasattr(flux, "reconfigure"):
             flux.reconfigure(errors="replace")
+    if args.cmd in ("copier-vers-test", "preparer-test"):
+        return _base_de_test(args)
     if args.cmd == "serve":
+        print("Base de " + db.environnement(db.connecter(args.base)).upper() + " : " + str(args.base))
         if args.hote not in ("127.0.0.1", "localhost"):
             print("ATTENTION : la console sera joignable depuis d'autres postes, et sans HTTPS les mots de passe "
                   "circulent en clair sur le réseau. À réserver à un serveur placé derrière un accès chiffré.", file=sys.stderr)
@@ -67,6 +80,18 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     elif args.cmd == "utilisateur":
         return _utilisateur(cx, args)
+    elif args.cmd == "environnement":
+        if args.valeur and args.valeur != db.environnement(cx):
+            reels = cx.execute("SELECT COUNT(*) AS n FROM envois WHERE mode='pennylane'").fetchone()["n"]
+            if args.valeur == "production" and db.environnement(cx) == "test":
+                print("Refusé : une base de test ne redevient pas une base de production. Elle peut contenir des abonnements "
+                      "simulés que Pennylane ne connaît pas.", file=sys.stderr)
+                return 2
+            if args.valeur == "test" and reels:
+                print(f"Refusé : cette base a déjà envoyé {reels} création(s) à Pennylane, c'est une base de production.", file=sys.stderr)
+                return 2
+            db.definir_environnement(cx, args.valeur)
+        print("Base de", db.environnement(cx).upper())
     elif args.cmd == "sauvegarder":
         print("Sauvegarde :", db.sauvegarder(cx, Path(args.vers)))
         print("Les pièces jointes sont à part, dans le dossier « pieces » à côté de la base : à sauvegarder aussi.")
@@ -86,6 +111,27 @@ def main(argv: list[str] | None = None) -> int:
             for ec in a["ecarts"]:
                 if not args.gravite or ec.gravite == args.gravite:
                     print(f"[{ec.gravite:<9}] {ec.dossier:<10} {ec.bail_code:<4} {ec.locataire[:22]:<22} {ec.titre}")
+    return 0
+
+
+def _base_de_test(args) -> int:
+    cible, source = Path(args.vers), Path(args.base)
+    if args.cmd == "preparer-test":
+        if cible.exists():
+            return 0                                     # déjà là : on ne touche à rien
+        if not source.exists():
+            cx = db.connecter(cible)                     # pas de production à copier : base de test vide
+            db.definir_environnement(cx, "test")
+            print(f"Base de test vide créée : {cible}")
+            return 0
+    try:
+        bilan = db.copier_vers_test(source, cible, remplacer=getattr(args, "remplacer", False))
+    except RuntimeError as exc:
+        print(f"Refusé. {exc}", file=sys.stderr)
+        return 2
+    print(f"Base de test prête : {bilan['cible']}")
+    print(f"  copie de {source} : {bilan['dossiers']} société(s), {bilan['baux']} bail/baux, {bilan['pieces']} pièce(s), "
+          f"{bilan['utilisateurs']} compte(s). Mêmes identifiants et mots de passe que la production.")
     return 0
 
 

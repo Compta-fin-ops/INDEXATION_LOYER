@@ -122,6 +122,33 @@ réclamerait : après une mise à jour, il suffit de le relancer.
 Tant que la console tourne sur un seul poste, ces comptes servent à s'exercer et à préparer la suite : seules
 les personnes assises à ce poste peuvent s'y connecter.
 
+## Base de production et base de test
+
+Deux bases, deux lanceurs, deux adresses. Elles peuvent tourner en même temps sur le poste.
+
+| | Production | Test |
+|---|---|---|
+| Lanceur | `lancer_console.bat` | `lancer_console_test.bat` |
+| Adresse | `http://127.0.0.1:8000` | `http://127.0.0.1:8001` |
+| Fichier | `data\cabinet.sqlite` | `data\test\test.sqlite` |
+| Pièces jointes | `data\pieces` | `data\test\pieces` |
+| À l'écran | Mention « base de production » en pied de page | Ruban violet « Base de test » sur toutes les pages, y compris la connexion |
+| Création d'abonnement | Réelle, verrous levés | Toujours simulée : aucun appel d'écriture vers Pennylane |
+
+Au premier lancement de `lancer_console_test.bat`, la base de test est créée par copie de la production :
+sociétés, baux, gels, pièces jointes et comptes. On s'y connecte avec le même identifiant et le même mot de passe.
+
+Pour repartir d'une copie fraîche de la production : fermer la console de test, puis double-cliquer sur
+`rafraichir_test.bat`. Il demande de taper OUI, car tout ce qui a été saisi dans le test est alors perdu.
+
+Trois protections :
+
+- une base de production n'est jamais écrasée par une copie, quelle que soit la commande ;
+- une base de test ne peut pas redevenir une base de production ;
+- la nature de la base est inscrite dans la base elle-même : elle la suit si le fichier est déplacé ou renommé.
+
+La lecture de Pennylane reste possible depuis la base de test si un jeton est déclaré : elle ne modifie rien.
+
 ## 5. S'exercer sans risque : le portefeuille fictif
 
 Dans une base séparée, pour ne jamais mélanger avec les vrais dossiers :

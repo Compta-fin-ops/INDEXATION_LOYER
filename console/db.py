@@ -149,6 +149,10 @@ CREATE TABLE IF NOT EXISTS envois (                 -- journal des créations d'
     reponse TEXT DEFAULT '',
     auteur TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS reglages (              -- réglages portés par la base elle-même
+    cle TEXT PRIMARY KEY,
+    valeur TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS imports (               -- fichier analysé, en attente de confirmation
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     horodatage TEXT NOT NULL,
@@ -237,3 +241,71 @@ def sauvegarder(cx: sqlite3.Connection, dossier: Path) -> Path:
     finally:
         copie.close()
     return cible
+
+
+ENVIRONNEMENTS = ("production", "test")
+
+
+def environnement(cx: sqlite3.Connection) -> str:
+    """Nature de la base, inscrite dans la base elle-même : elle la suit où qu'on la copie. Production par défaut."""
+    r = cx.execute("SELECT valeur FROM reglages WHERE cle='environnement'").fetchone()
+    return r["valeur"] if r and r["valeur"] in ENVIRONNEMENTS else "production"
+
+
+def definir_environnement(cx: sqlite3.Connection, valeur: str) -> None:
+    if valeur not in ENVIRONNEMENTS:
+        raise ValueError(f"Environnement inconnu : {valeur}")
+    cx.execute("INSERT INTO reglages (cle, valeur) VALUES ('environnement', ?) ON CONFLICT(cle) DO UPDATE SET valeur=excluded.valeur",
+               (valeur,))
+    cx.commit()
+
+
+def copier_vers_test(source: Path, cible: Path, remplacer: bool = False) -> dict:
+    """Copie une base de production vers une base de test, pièces jointes comprises.
+
+    La copie est marquée « test » et ses sessions sont fermées. Une base de production n'est jamais
+    écrasée : la cible doit être absente, ou être une base de test avec `remplacer`."""
+    import os
+    import shutil
+    source, cible = Path(source), Path(cible)
+    if not source.exists():
+        raise RuntimeError(f"Base source introuvable : {source}")
+    if source.resolve() == cible.resolve():
+        raise RuntimeError("La base de test ne peut pas être la base de production elle-même.")
+    cx = connecter(source)
+    if environnement(cx) != "production":
+        raise RuntimeError("La base source est déjà une base de test.")
+    if cible.exists():
+        existante = connecter(cible)
+        nature = environnement(existante)
+        existante.close()
+        if nature != "test":
+            raise RuntimeError(f"Refusé : {cible} est une base de production, elle ne sera jamais écrasée.")
+        if not remplacer:
+            raise RuntimeError(f"La base de test {cible} existe déjà. Pour la remplacer par une copie fraîche : option --remplacer.")
+    cible.parent.mkdir(parents=True, exist_ok=True)
+    provisoire = cible.with_name(cible.name + ".nouvelle")
+    if provisoire.exists():
+        provisoire.unlink()
+    copie = sqlite3.connect(str(provisoire))
+    try:
+        cx.backup(copie)
+        copie.execute("INSERT INTO reglages (cle, valeur) VALUES ('environnement', 'test') "
+                      "ON CONFLICT(cle) DO UPDATE SET valeur='test'")
+        copie.execute("DELETE FROM sessions")
+        copie.execute("INSERT INTO historique (horodatage, auteur, action, detail) VALUES (datetime('now', 'localtime'), 'poste local', "
+                      "'Base de test créée', ?)", (f"copie de {source.name}",))
+        copie.commit()
+        bilan = {t: copie.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("dossiers", "baux", "pieces", "utilisateurs")}
+    finally:
+        copie.close()
+        cx.close()
+    try:
+        os.replace(provisoire, cible)
+    except PermissionError as exc:                       # Windows : fichier ouvert par une console de test en marche
+        provisoire.unlink(missing_ok=True)
+        raise RuntimeError("La base de test est en cours d'utilisation : fermer la console de test, puis recommencer.") from exc
+    pieces_source, pieces_cible = source.parent / "pieces", cible.parent / "pieces"
+    if pieces_source.is_dir():                           # fichiers nommés par leur empreinte : on ajoute, on n'écrase ni ne retire
+        shutil.copytree(pieces_source, pieces_cible, dirs_exist_ok=True)
+    return {"cible": cible, **bilan}

@@ -123,3 +123,6 @@ tr.a-venir td { background: color-mix(in srgb, var(--fond) 60%, transparent); }
 .formulaire.une { grid-template-columns: 1fr; }
 .decision.compte { grid-template-columns: 150px 120px minmax(190px, 1fr) auto; min-width: 600px; }
 .entete-droite form { margin: 0; }
+.ruban-test { background: #6d28d9; color: #fff; text-align: center; font-weight: 600; font-size: 12.5px; padding: 5px 16px; letter-spacing: .02em; }
+.pastille.test { background: #6d28d9; color: #fff; margin-left: 6px; vertical-align: 2px; }
+body.env-test .entete { border-bottom: 3px solid #6d28d9; }
