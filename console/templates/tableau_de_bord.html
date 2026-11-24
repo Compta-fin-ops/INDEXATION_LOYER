@@ -1,64 +1,71 @@
 {% extends "base.html" %}{% import "_ecart.html" as E with context %}
 {% block contenu %}
-<h1>Loyers facturés, tous dossiers</h1>
-<p class="sous-titre">{{ s.nb_dossiers }} dossiers, {{ s.nb_baux }} baux. Loyer attendu selon les baux, comparé aux abonnements Pennylane en cours. <a href="/nouveau-dossier">Nouveau dossier</a> · <a href="/import">Importer un fichier Excel ou CSV</a></p>
+<h1>Pilotage des loyers</h1>
+<p class="sous-titre">{{ analyses | length }} dossier(s), {{ nb.baux }} bail/baux. Ce qui est à corriger dans la facturation, et les réindexations à préparer. <a href="/nouveau-dossier">Nouveau dossier</a> · <a href="/import">Importer un fichier Excel ou CSV</a></p>
 {% for code, col in collectes.items() if col.message %}<div class="bandeau erreur">Lecture de Pennylane en échec pour <a href="/dossiers/{{ code }}">{{ code }}</a>, le {{ col.horodatage[:10] | date_fr }} à {{ col.horodatage[11:16] }} : {{ col.message | replace('ÉCHEC : ', '') }}.</div>{% endfor %}
 
 <div class="tuiles">
-  <div class="tuile"><div class="libelle">Loyers attendus</div><div class="valeur">{{ s.attendu | eur }}</div><div class="note">par an, hors taxes, charges comprises</div></div>
-  <div class="tuile"><div class="libelle">Loyers facturés</div><div class="valeur">{{ s.facture | eur }}</div><div class="note">abonnements en cours, annualisés</div></div>
-  <div class="tuile {{ 'alerte' if s.ecart > 1 else 'bon' }}"><div class="libelle">Non facturé</div><div class="valeur">{{ s.ecart | eur }}</div><div class="note">{{ (s.ecart / s.attendu) | pct if s.attendu else '—' }} du loyer attendu</div></div>
-  <div class="tuile {{ 'alerte' if s.compte.bloquant else 'bon' }}"><div class="libelle">Écarts bloquants</div><div class="valeur">{{ s.compte.bloquant }}</div><div class="note">{{ s.compte.a_traiter }} autres à traiter</div></div>
-  <div class="tuile {{ 'attention' if s.impayes else 'bon' }}"><div class="libelle">Impayés</div><div class="valeur">{{ s.impayes | eur }}</div><div class="note">{{ s.nb_impayes }} facture(s) échue(s), TTC</div></div>
-  <div class="tuile"><div class="libelle">Révisions sous 60 jours</div><div class="valeur">{{ s.revisions_60j }}</div><div class="note"><a href="/echeancier">voir l'échéancier</a></div></div>
+  <a class="tuile {{ 'alerte' if nb.bloquant else 'bon' }}" href="#corriger"><div class="libelle">À corriger</div><div class="valeur">{{ nb.bloquant }}</div><div class="note">loyer non facturé, ou facturé à tort</div></a>
+  <a class="tuile {{ 'attention' if nb.a_traiter else 'bon' }}" href="#corriger"><div class="libelle">À régulariser</div><div class="valeur">{{ nb.a_traiter }}</div><div class="note">abonnement à borner, à préparer, à vérifier</div></a>
+  <a class="tuile {{ 'attention' if nb.a_faire else 'bon' }}" href="#reindexations"><div class="libelle">Réindexations à préparer</div><div class="valeur">{{ nb.a_faire }}</div><div class="note">indice publié ou gel décidé, sous {{ horizon }} jours</div></a>
+  <a class="tuile {{ 'alerte' if nb.retard else '' }}" href="#reindexations"><div class="libelle">En attente d'indice</div><div class="valeur">{{ nb.attente + nb.retard }}</div><div class="note">{% if nb.retard %}dont {{ nb.retard }} révision(s) déjà échue(s){% else %}aucune révision échue{% endif %}</div></a>
 </div>
 
-<div class="grille">
-  <div>
-    <div class="carte">
-      <h2>Par dossier</h2>
-      <div class="defile"><table>
-        <thead><tr><th>Dossier</th><th class="num">Baux</th><th class="num">Attendu / an</th><th class="num">Facturé / an</th><th class="num">Non facturé</th><th>Écarts</th><th>Baux conformes</th></tr></thead>
-        <tbody>
-        {% for a in analyses %}
-        <tr>
-          <td><a class="fort" href="/dossiers/{{ a.dossier.code }}">{{ a.dossier.nom }}</a></td>
-          <td class="num">{{ a.nb_baux }}</td>
-          <td class="num">{{ a.attendu_annuel | eur }}</td>
-          <td class="num">{{ a.facture_annuel | eur }}</td>
-          <td class="num {{ 'negatif' if a.ecart_annuel > 1 }}">{{ a.ecart_annuel | eur }}</td>
-          <td style="white-space: nowrap">{% if a.compte.bloquant %}<span class="pastille bloquant">{{ a.compte.bloquant }}</span> {% endif %}{% if a.compte.a_traiter %}<span class="pastille a_traiter">{{ a.compte.a_traiter }}</span>{% endif %}{% if not a.compte.bloquant and not a.compte.a_traiter %}<span class="pastille ok">Conforme</span>{% endif %}</td>
-          <td><span class="petit discret">{{ a.nb_ok }} sur {{ a.nb_baux }}</span><div class="jauge"><span style="width: {{ (100 * a.nb_ok / a.nb_baux) | round | int if a.nb_baux else 0 }}%"></span></div></td>
-        </tr>
-        {% endfor %}
-        <tr class="total"><td>Total</td><td class="num">{{ s.nb_baux }}</td><td class="num">{{ s.attendu | eur }}</td><td class="num">{{ s.facture | eur }}</td><td class="num">{{ s.ecart | eur }}</td><td></td><td class="petit">{{ s.nb_ok }} sur {{ s.nb_baux }}</td></tr>
-        </tbody>
-      </table></div>
-    </div>
-    <div class="carte">
-      <h2>À traiter en priorité</h2>
-      {{ E.lignes(priorites, noms) }}
-      <p class="petit" style="margin: 12px 0 0"><a href="/ecarts">Tous les écarts</a></p>
-    </div>
-  </div>
-  <div>
-    <div class="carte">
-      <h2>Prochaines échéances</h2>
-      <ul class="liste">
-      {% for l in prochaines %}
-        <li>
-          <span><a class="fort" href="/baux/{{ l.bail.id }}">{{ l.bail.locataire }}</a> <span class="discret">· {{ noms[l.dossier] }}</span></span>
-          <span class="fort">{{ l.date | date_fr }}</span>
-          <span class="discret petit">{{ l.nature }} · {{ l.detail }}</span>
-          <span class="petit discret" style="text-align: right">dans {{ l.jours }} j</span>
-        </li>
-      {% else %}<li class="discret">Aucune échéance sous 60 jours.</li>{% endfor %}
-      </ul>
-    </div>
-    <div class="carte">
-      <h2>Lecture du tableau</h2>
-      <p class="petit discret" style="margin: 0">Chaque abonnement couvre une période d'indexation et s'arrête à la date anniversaire. Un bail est conforme quand son abonnement en cours facture le loyer attendu et qu'il est borné à la prochaine révision. « Non facturé » additionne les loyers attendus sans abonnement en cours et les révisions non répercutées.</p>
-    </div>
-  </div>
+<div class="carte" id="corriger">
+  <h2>Facturation à corriger</h2>
+  {{ E.lignes(a_corriger, noms) }}
+  <p class="petit" style="margin: 12px 0 0">{% if nb_corriger > a_corriger | length %}{{ a_corriger | length }} premières lignes sur {{ nb_corriger }}. {% endif %}<a href="/ecarts">Tous les écarts</a>{% if impayes %} · <a href="/ecarts?type=IMPAYE">{{ impayes | length }} facture(s) impayée(s)</a>, à relancer{% endif %}</p>
+</div>
+
+<div class="carte" id="reindexations">
+  <h2>Réindexations à piloter</h2>
+  <p class="discret petit" style="margin: -6px 0 12px">Révisions échues sans indice, et prochaine révision de chaque bail sous {{ horizon }} jours.
+    Horizon : {% for h in (60, 90, 180, 365) %}{% if h == horizon %}<span class="fort">{{ h }} j</span>{% else %}<a href="/?horizon={{ h }}#reindexations">{{ h }} j</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+  <div class="defile"><table>
+    <thead><tr><th>Révision</th><th>Dossier</th><th>Bail</th><th>Indice</th><th class="num">Loyer avant</th><th class="num">Loyer révisé</th><th>Courrier</th><th>Abonnement suivant</th><th>À faire</th></tr></thead>
+    <tbody>
+    {% for l in pilote %}
+    <tr class="{{ 'a-venir' if l.etat == 'faite' }}">
+      <td style="white-space: nowrap">{{ l.date | date_fr }}<div class="discret petit {{ 'negatif' if l.jours < 0 }}">{{ 'dans ' ~ l.jours ~ ' j' if l.jours >= 0 else 'échue depuis ' ~ (-l.jours) ~ ' j' }}</div></td>
+      <td><a href="/dossiers/{{ l.dossier.code }}">{{ l.dossier.nom }}</a></td>
+      <td><a class="fort" href="/baux/{{ l.bail.id }}">{{ l.bail.code }}</a> {{ l.bail.locataire }}</td>
+      <td style="white-space: nowrap">{{ l.indice }}<div class="petit">{% if l.gel %}<span class="pastille info">Gel décidé</span>{% elif l.publie %}<span class="pastille ok">Publié</span>{% else %}<span class="pastille {{ 'bloquant' if l.jours < 0 else 'neutre' }}">Non publié</span>{% endif %}</div></td>
+      <td class="num">{{ l.avant | eur2 }}</td>
+      <td class="num fort">{% if l.gel %}{{ l.avant | eur2 }}<div class="discret petit">maintenu</div>{% else %}{{ l.apres | eur2 }}{% if l.variation is not none %}<div class="discret petit">{{ '%+.2f' | format(l.variation * 100) | replace('.', ',') }} %</div>{% endif %}{% endif %}</td>
+      <td class="petit" style="white-space: nowrap">{% if l.courrier_le %}envoyé le {{ l.courrier_le | date_fr }}{% elif l.numero and (l.publie or l.gel) %}<a href="/baux/{{ l.bail.id }}/revisions/{{ l.numero }}/courrier.pdf">éditer le PDF</a>{% else %}<span class="discret">—</span>{% endif %}</td>
+      <td class="petit">{% if l.abonnement_pret %}<span class="pastille ok">Créé</span>{% elif l.gel %}<span class="discret">inchangé</span>{% elif l.publie and l.jours >= 0 %}<a href="/baux/{{ l.bail.id }}/abonnement">à créer</a>{% else %}<span class="discret">—</span>{% endif %}</td>
+      <td>{% if l.etat == 'retard' %}<span class="pastille bloquant">Indice attendu</span><div class="discret petit">loyer provisoire, rappel à prévoir</div>
+          {% elif l.etat == 'attente' %}<span class="pastille neutre">Attendre l'indice</span>
+          {% elif l.etat == 'faite' %}<span class="pastille ok">Prête</span>
+          {% else %}<span class="pastille a_traiter">À préparer</span><div class="discret petit">{% if not l.courrier_le %}courrier{% endif %}{% if not l.courrier_le and not l.abonnement_pret and not l.gel %}, {% endif %}{% if not l.abonnement_pret and not l.gel %}abonnement{% endif %}</div>{% endif %}
+          {% if l.commentaire %}<div class="discret petit">{{ l.commentaire }}</div>{% endif %}</td>
+    </tr>
+    {% else %}<tr><td colspan="9" class="discret">Aucune réindexation sous {{ horizon }} jours.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  <p class="discret petit" style="margin: 10px 0 0">Une révision est « prête » quand le courrier est daté comme envoyé sur la fiche du bail et que l'abonnement de la période suivante existe dans Pennylane. Une révision gelée ne demande que le courrier.</p>
+</div>
+
+<div class="carte">
+  <h2>Par dossier</h2>
+  <div class="defile"><table>
+    <thead><tr><th>Dossier</th><th class="num">Baux</th><th>À corriger</th><th>À régulariser</th><th>Prochaine réindexation</th><th>Lecture de Pennylane</th></tr></thead>
+    <tbody>
+    {% for a in analyses %}{% set col = collectes.get(a.dossier.code) %}
+    <tr>
+      <td><a class="fort" href="/dossiers/{{ a.dossier.code }}">{{ a.dossier.nom }}</a></td>
+      <td class="num">{{ a.nb_baux }}</td>
+      <td>{% if a.compte.bloquant %}<span class="pastille bloquant">{{ a.compte.bloquant }}</span>{% else %}<span class="discret">—</span>{% endif %}</td>
+      <td>{% if a.compte.a_traiter %}<span class="pastille a_traiter">{{ a.compte.a_traiter }}</span>{% else %}<span class="discret">—</span>{% endif %}</td>
+      <td>{% if prochaine.get(a.dossier.code) %}{{ prochaine[a.dossier.code] | date_fr }}{% else %}<span class="discret">aucune sous {{ horizon }} j</span>{% endif %}</td>
+      <td class="petit">{% if a.dossier.source_referentiel == 'portefeuille fictif' %}<span class="discret">données simulées</span>
+          {% elif col and col.message %}<span class="negatif">en échec</span>
+          {% elif col %}le {{ col.horodatage[:10] | date_fr }} à {{ col.horodatage[11:16] }}
+          {% else %}<a href="/dossiers/{{ a.dossier.code }}/pennylane">non raccordé</a>{% endif %}</td>
+    </tr>
+    {% else %}<tr><td colspan="6" class="discret">Aucun dossier. <a href="/nouveau-dossier">Créer le premier</a>, ou <a href="/import">importer un fichier</a>.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
 </div>
 {% endblock %}

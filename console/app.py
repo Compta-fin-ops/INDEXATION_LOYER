@@ -298,16 +298,78 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         cx.commit()
         return page_utilisateurs(request, message=f"{cible['identifiant']} : " + (", ".join(faits) or "aucun changement") + ".")
 
+    def pilotage(an: list[dict], horizon: int) -> list[dict]:
+        """Réindexations à piloter : révisions échues sans indice, et prochaine révision de chaque bail dans l'horizon.
+
+        Chaque ligne dit où en est la préparation : indice publié ou non, décision de gel, courrier envoyé,
+        abonnement de la période suivante déjà créé dans Pennylane."""
+        table = table_indices()
+        lignes = []
+        for a in an:
+            for sit in a["situations"]:
+                b = sit.bail
+                candidates = []
+                if b.get("calcule") and b.get("date_effet"):
+                    dec = referentiel.decisions_du_bail(cx, b["id"])
+                    _, revs = referentiel.reviser(b, table, {n: d["decision"] for n, d in dec.items()}, jour())
+                    en_retard = [l for l in revs if l.statut == calcul.STATUT_ATTENDU]
+                    prochaine = next((l for l in revs if l.echeance.date_revision > jour()), None)
+                    for l in [*en_retard[-1:], *([prochaine] if prochaine else [])]:
+                        d = dec.get(l.echeance.numero, {})
+                        candidates.append({"date": l.echeance.date_revision, "numero": l.echeance.numero,
+                                           "indice": f"{b['indice']} {l.echeance.trimestre_reference}",
+                                           "publie": l.indice_reference is not None, "gel": est_gel(l.decision),
+                                           "avant": l.loyer_precedent, "apres": l.loyer_retenu, "variation": l.variation_pct,
+                                           "courrier_le": d.get("courrier_le"), "commentaire": d.get("commentaire") or ""})
+                elif b.get("date_prochaine_revision"):            # bail aux valeurs importées : pas de détail de calcul
+                    candidates.append({"date": rp._d(b["date_prochaine_revision"]), "numero": None, "indice": b.get("indice") or "",
+                                       "publie": b.get("loyer_prochain_annuel") is not None, "gel": False,
+                                       "avant": b.get("loyer_attendu_annuel"), "apres": b.get("loyer_prochain_annuel"),
+                                       "variation": None, "courrier_le": None, "commentaire": ""})
+                for c in candidates:
+                    jours = (c["date"] - jour()).days
+                    if jours > horizon:
+                        continue
+                    debut_suivant = rp._d(sit.suivant.get("debut")) if sit.suivant else None
+                    abonnement_pret = c["date"] > jour() and debut_suivant is not None and debut_suivant >= c["date"]
+                    if not c["publie"] and not c["gel"]:
+                        etat = "retard" if jours < 0 else "attente"
+                    elif c["date"] <= jour():
+                        continue                          # révision échue et chiffrée : c'est l'affaire des écarts
+                    elif c["gel"]:
+                        etat = "faite" if c["courrier_le"] else "a_faire"
+                    else:
+                        etat = "faite" if c["courrier_le"] and abonnement_pret else "a_faire"
+                    lignes.append({**c, "jours": jours, "bail": b, "dossier": a["dossier"], "abonnement_pret": abonnement_pret, "etat": etat})
+        ordre = {"retard": 0, "a_faire": 1, "attente": 2, "faite": 3}
+        return sorted(lignes, key=lambda l: (ordre[l["etat"]], l["date"]))
+
     @app.get("/", response_class=HTMLResponse)
-    def tableau_de_bord(request: Request):
+    def tableau_de_bord(request: Request, horizon: int = 90):
+        horizon = min(max(horizon, 30), 730)
         an = analyses()
         ordre = {g: i for i, g in enumerate(rp.GRAVITES)}
-        priorites = sorted((e for a in an for e in a["ecarts"] if e.gravite != "info"),
-                           key=lambda e: (ordre[e.gravite], -abs(e.montant)))[:12]
+        pilote = pilotage(an, horizon)
+        pilotes = {l["bail"]["id"] for l in pilote}     # leur abonnement suivant se traite dans le tableau des réindexations
+        a_corriger = sorted((e for a in an for e in a["ecarts"] if e.gravite != "info" and e.type != "IMPAYE"
+                             and not (e.type == "RENOUVELLEMENT" and e.bail_id in pilotes)),
+                            key=lambda e: (ordre[e.gravite], -abs(e.montant)))
+        impayes = [e for a in an for e in a["ecarts"] if e.type == "IMPAYE"]
+        prochaine = {}
+        for l in pilote:
+            code = l["dossier"]["code"]
+            if l["date"] > jour() and (code not in prochaine or l["date"] < prochaine[code]):
+                prochaine[code] = l["date"]
         noms = {a["dossier"]["code"]: a["dossier"]["nom"] for a in an}
         return gabarits.TemplateResponse(request, "tableau_de_bord.html", contexte(
-            request, page="bord", analyses=an, s=synthese(an), priorites=priorites, noms=noms,
-            prochaines=rp.echeancier(an, jour(), 60)[:8]))
+            request, page="bord", analyses=an, noms=noms, horizon=horizon, pilote=pilote, prochaine=prochaine,
+            a_corriger=a_corriger[:15], nb_corriger=len(a_corriger), impayes=impayes,
+            nb={"bloquant": sum(1 for e in a_corriger if e.gravite == "bloquant"),
+                "a_traiter": sum(1 for e in a_corriger if e.gravite == "a_traiter"),
+                "a_faire": sum(1 for l in pilote if l["etat"] == "a_faire"),
+                "attente": sum(1 for l in pilote if l["etat"] == "attente"),
+                "retard": sum(1 for l in pilote if l["etat"] == "retard"),
+                "baux": sum(a["nb_baux"] for a in an)}))
 
     @app.get("/ecarts", response_class=HTMLResponse)
     def ecarts(request: Request, gravite: str = "", type: str = "", dossier: str = ""):

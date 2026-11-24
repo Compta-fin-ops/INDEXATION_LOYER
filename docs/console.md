@@ -106,6 +106,20 @@ La base est désormais la source de vérité. `python -m console sauvegarder` en
 `data/sauvegardes`. Les pièces jointes sont des fichiers à part, dans le dossier `pieces` à côté de la base :
 les deux sont à sauvegarder, et aucun n'est versionné.
 
+## Le tableau de bord
+
+Il sert à deux choses et ne montre rien d'autre : pas de total de loyers ni de chiffre d'affaires.
+
+| Bloc | Ce qu'il montre |
+|---|---|
+| Facturation à corriger | Les irrégularités, bloquantes d'abord : bail sans abonnement, abonnement arrivé à terme, révision non répercutée, échéance non facturée, abonnement à borner. Les impayés sont comptés à part, par un lien |
+| Réindexations à piloter | Les révisions échues sans indice, puis la prochaine révision de chaque bail dans l'horizon choisi. Pour chacune : l'indice attendu et s'il est publié, le loyer avant et après, le courrier, l'abonnement de la période suivante, et ce qu'il reste à faire |
+| Par dossier | Le nombre d'irrégularités, la prochaine réindexation et l'état de la lecture de Pennylane |
+
+Une réindexation passe par quatre états : « attendre l'indice », « indice attendu » si la date est dépassée,
+« à préparer » dès que l'indice est publié ou qu'un gel est décidé, « prête » quand le courrier est daté comme
+envoyé et que l'abonnement suivant existe dans Pennylane.
+
 ## Le principe de facturation : un abonnement par période d'indexation
 
 La question « comment changer le loyer à la date anniversaire » est réglée par la structure, pas par une
