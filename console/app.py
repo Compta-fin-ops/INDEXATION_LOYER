@@ -158,9 +158,10 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
 
     def collectes() -> dict[str, dict]:
         """Dernière collecte Pennylane de chaque dossier : date, volumes lus, ou message d'échec."""
+        raccordes = {r["code"] for r in cx.execute("SELECT code, variable_jeton FROM dossiers") if jetons.source(r["variable_jeton"])}
         return {r["dossier"]: dict(r) for r in cx.execute(
             """SELECT s.* FROM synchros s JOIN (SELECT dossier, MAX(id) AS id FROM synchros GROUP BY dossier) d ON d.id = s.id
-               WHERE s.source='pennylane'""")}
+               WHERE s.source='pennylane'""") if r["dossier"] in raccordes}        # un dossier sans jeton n'a pas d'échec à montrer
 
     def synthese(an: list[dict]) -> dict:
         ecarts = [e for a in an for e in a["ecarts"]]
@@ -499,13 +500,22 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         return dict(d)
 
     @app.get("/dossiers/{code}/baux/nouveau", response_class=HTMLResponse)
-    def bail_nouveau(request: Request, code: str):
+    def bail_nouveau(request: Request, code: str, customer_id: int | None = None, abonnement: int | None = None):
         d = dossier_ou_404(code)
         pris = {r["code"] for r in cx.execute("SELECT code FROM baux WHERE dossier=?", (code,))}
         suivant = next(f"B{i:02d}" for i in range(1, 1000) if f"B{i:02d}" not in pris)
-        return page_bail_form(request, d, {"code": suivant, "tva_pct": 20, "duree_ans": 9, "periodicite_revision_ans": 1,
-                                           "periodicite": "Mensuelle", "indice": "ILC", "methode": "Chaînée",
-                                           "type_bail": "Commercial"}, [], None)
+        depart = {"code": suivant, "tva_pct": 20, "duree_ans": 9, "periodicite_revision_ans": 1, "periodicite": "Mensuelle",
+                  "indice": "ILC", "methode": "Chaînée", "type_bail": "Commercial", "customer_id": customer_id}
+        note = None
+        abo = cx.execute("SELECT * FROM abonnements WHERE dossier=? AND id=?", (code, abonnement)).fetchone() if abonnement else None
+        if abo is not None:                              # bail créé à partir d'un abonnement lu dans Pennylane
+            par_an = rp.occurrences_par_an(dict(abo))
+            depart["periodicite"] = {12: "Mensuelle", 4: "Trimestrielle", 2: "Semestrielle", 1: "Annuelle"}.get(round(par_an), "Mensuelle")
+            depart["customer_id"] = customer_id or abo["customer_id"]
+            note = (f"Bail créé à partir de l'abonnement Pennylane n° {abo['id']}, « {abo['label']} » : "
+                    f"{_eur(abo['montant_ht'], 2)} HT par occurrence, soit {_eur(abo['montant_ht'] * par_an, 2)} par an. "
+                    "Le client et la périodicité sont repris. Le loyer initial, la date d'effet et l'indice restent à saisir d'après le bail.")
+        return page_bail_form(request, d, depart, [], None, avertissement=note)
 
     @app.post("/dossiers/{code}/baux")
     async def bail_creer(request: Request, code: str):
@@ -712,9 +722,11 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
             "SELECT code, variable_jeton FROM dossiers WHERE source_referentiel<>?", (FICTIF,))}   # jamais le fictif
         if code and code not in variables:
             return [{"dossier": code, "ok": False, "message": "dossier fictif : aucune collecte"}]
-        if not variables:
+        # « Actualiser » ne lit que les dossiers raccordés : un dossier sans jeton n'est pas un échec
+        codes = [code] if code else sorted(c for c, v in variables.items() if jetons.source(v))
+        if not codes:
             return []
-        return depot.synchroniser(cx, ClientReel(variables), [code] if code else sorted(variables), source="pennylane")
+        return depot.synchroniser(cx, ClientReel(variables), codes, source="pennylane")
 
     def preparer(bail_id: int):
         """(analyse du dossier, situation du bail, proposition au mode brouillon imposé, contrôles)."""

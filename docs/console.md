@@ -194,7 +194,8 @@ par échéance est le plus proche.
 | Avoirs, proformas et devis présents dans la liste des factures | Collectés avec leur statut, écartés du rapprochement. **Signe des montants d'un avoir : inconnu** |
 | Environnement de test Pennylane (Sandbox) | Existe selon le centre d'aide : un dossier de démonstration par utilisateur, nommé « Sandbox - votre email », avec son propre jeton d'API. La console sait tester la connexion d'un dossier en lecture seule et reconnaître cette marque. **Schéma de la route d'identité non vérifié** ; aucune création n'y a encore été faite |
 | Jeton cabinet | La doc indique qu'un jeton cabinet est accepté sur l'API v2 avec l'en-tête `X-Company-Id`. Non exploité : la console utilise un jeton par dossier |
-| Appel réel à Pennylane | **Jamais exécuté**, faute de jeton |
+| Appel réel à Pennylane, en lecture | Exécuté le 24/11/2026 sur un environnement de test Pennylane : la liste des abonnements a été lue et rapprochée. La liste des factures a été appelée sans erreur ; son contenu n'a pas encore été observé |
+| Appel réel à Pennylane, en écriture | **Jamais exécuté** |
 
 Tout ce qui parle à Pennylane en lecture est isolé dans `console/pennylane_api.py`, fonctions
 `normaliser_abonnement`, `normaliser_facture` et `_pages`. C'est le seul fichier à ajuster au premier essai réel.

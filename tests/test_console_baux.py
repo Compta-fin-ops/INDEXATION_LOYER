@@ -160,8 +160,8 @@ def test_base_reelle_jamais_ecrasee_et_sauvegarde(console, tmp_path):
     copie = db.sauvegarder(cx, tmp_path / "sauvegardes")
     assert db.connecter(copie).execute("SELECT locataire FROM baux").fetchone()["locataire"] == "Boulangerie Martin"
     assert "Données simulées" not in c.get("/").text                        # un dossier réel : plus de bandeau de simulation
-    assert c.post("/actions/synchroniser", follow_redirects=False).status_code == 303      # sans jeton : échec tracé, pas d'erreur
-    assert cx.execute("SELECT message FROM synchros ORDER BY id DESC").fetchone()["message"].startswith("ÉCHEC")
+    assert c.post("/actions/synchroniser", follow_redirects=False).status_code == 303      # sans jeton : rien n'est lu, rien ne casse
+    assert cx.execute("SELECT COUNT(*) AS n FROM synchros").fetchone()["n"] == 0
 
 
 def test_facture_conforme_au_schema_officiel():

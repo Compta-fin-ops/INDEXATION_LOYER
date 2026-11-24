@@ -9,7 +9,7 @@
     {% if avec_dossier %}<td><a href="/dossiers/{{ e.dossier }}">{{ noms[e.dossier] if noms else e.dossier }}</a></td>{% endif %}
     <td>{% if e.bail_id %}<a href="/baux/{{ e.bail_id }}">{{ e.bail_code }}</a><div class="discret petit">{{ e.locataire }}</div>{% else %}<span class="discret">—</span>{% endif %}</td>
     <td><div class="ecart-ligne"><span class="fort">{{ e.titre }}</span>{% if e.detail %}<span class="discret petit">{{ e.detail }}</span>{% endif %}</div></td>
-    <td class="petit">{{ e.action or '—' }}</td>
+    <td class="petit">{% if e.type == 'ORPHELIN' and e.customer_id %}<a class="fort" href="/dossiers/{{ e.dossier }}/baux/nouveau?customer_id={{ e.customer_id }}&amp;abonnement={{ e.abonnement_id }}">Créer le bail de ce client</a>, ou arrêter l'abonnement dans Pennylane{% else %}{{ e.action or '—' }}{% endif %}</td>
     <td class="num">{% if e.montant %}{{ e.montant | eur }}{% else %}<span class="discret">—</span>{% endif %}</td>
   </tr>
   {% else %}<tr><td colspan="6" class="discret">Aucun écart.</td></tr>

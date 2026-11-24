@@ -266,7 +266,12 @@ def test_resultat_de_la_lecture_de_pennylane_visible(production, monkeypatch):
     import urllib.error
     from console import pennylane_api
     prod, c, _ = production
-    assert "pas encore été lu" in c.get("/dossiers/HALLES").text
+    assert "tant qu'aucun jeton" in c.get("/dossiers/HALLES").text.replace("&#39;", "'")
+    # sans jeton, « Actualiser » ne lit rien et ne signale aucun échec : le dossier n'est pas raccordé, voilà tout
+    monkeypatch.delenv("PENNYLANE_TOKEN_HALLES", raising=False)
+    monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", lambda *a, **k: pytest.fail("appel sans jeton"))
+    c.post("/actions/synchroniser")
+    assert "en échec" not in c.get("/").text and db.connecter(prod).execute("SELECT COUNT(*) AS n FROM synchros").fetchone()["n"] == 0
     monkeypatch.setenv("PENNYLANE_TOKEN_HALLES", "jeton-de-test-suffisamment-long")
     monkeypatch.setattr(pennylane_api.time, "sleep", lambda s: None)
 
@@ -290,3 +295,20 @@ def test_resultat_de_la_lecture_de_pennylane_visible(production, monkeypatch):
     page = c.get("/dossiers/HALLES").text
     assert "1 abonnement(s), 0 facture(s)" in page and "en échec" not in page
     assert "n° 501" in c.get("/baux/1").text                                 # l'abonnement lu est rattaché au bail du client 77
+    # un abonnement d'un client sans bail : la console propose de créer le bail, client et périodicité repris
+    orphelin = {**abonnement, "id": 19875901440, "label": "Facture SOCOBAT", "customer": {"id": 4321, "url": "x"},
+                "recurring_rule": {"rule_type": "monthly", "interval": 3, "count": None},
+                "customer_invoice_data": {"currency_amount_before_tax": "120.00"}}
+    monkeypatch.setattr(pennylane_api.urllib.request, "urlopen", lambda req, timeout=60: _Reponse(
+        {"items": [abonnement, orphelin] if "billing_subscriptions" in req.full_url else [], "has_more": False, "next_cursor": None}))
+    c.post("/actions/synchroniser")
+    page = c.get("/dossiers/HALLES").text
+    assert "Abonnement n° 19875901440 sans bail dans la console" in page and "client Pennylane n° 4321" in page
+    lien = "/dossiers/HALLES/baux/nouveau?customer_id=4321&amp;abonnement=19875901440"
+    assert lien in page
+    formulaire = c.get(lien.replace("&amp;", "&")).text
+    assert 'name="customer_id" value="4321"' in formulaire and "Facture SOCOBAT" in formulaire and "480,00" in formulaire
+    assert '<option value="Trimestrielle" selected>' in formulaire
+    # un jeton retiré depuis : l'ancien échec ou succès ne s'affiche plus comme un état courant
+    monkeypatch.delenv("PENNYLANE_TOKEN_HALLES")
+    assert "Dernière lecture de Pennylane" not in c.get("/dossiers/HALLES").text

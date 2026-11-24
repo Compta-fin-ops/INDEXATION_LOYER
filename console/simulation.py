@@ -145,7 +145,7 @@ def generer(aujourdhui: date, graine: int = 2026) -> tuple[list[dict], dict[str,
                               "currency_amount_before_tax": f"{montant:.2f}", "currency_amount": f"{ttc:.2f}",
                               "remaining_amount_with_tax": f"{restant:.2f}"})
             baux.append(bail)
-        if code in ("PARC", "MOULIN"):          # un abonnement sans bail au référentiel
+        if code in ("PARC", "MOULIN"):          # un abonnement sans bail dans la console
             id_abo += 1
             id_client += 1
             abos.append({"id": id_abo, "customer": {"id": id_client}, "label": "Loyer emplacement de parking n° 7",

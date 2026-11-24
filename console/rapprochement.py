@@ -39,6 +39,8 @@ class Ecart:
     bail_id: int | None = None
     bail_code: str = ""
     locataire: str = ""
+    customer_id: int | None = None  # client Pennylane en cause, pour un abonnement sans bail
+    abonnement_id: int | None = None
 
     def dict(self) -> dict:
         return asdict(self)
@@ -367,8 +369,10 @@ def analyser_dossier(dossier: dict, baux: list[dict], abonnements: list[dict], f
     for a in orphelins:
         if a.get("statut") in STATUTS_ACTIFS:
             ecarts.append(Ecart(type="ORPHELIN", gravite="a_traiter", dossier=dossier["code"],
-                                titre=f"Abonnement n° {a['id']} sans bail au référentiel",
-                                detail=f"« {a.get('label', '')} », {_eur(a['montant_ht'])} par occurrence.",
+                                titre=f"Abonnement n° {a['id']} sans bail dans la console",
+                                detail=f"« {a.get('label', '')} », {_eur(a['montant_ht'])} par occurrence"
+                                       + (f", client Pennylane n° {a['customer_id']}." if a.get("customer_id") else "."),
+                                customer_id=a.get("customer_id"), abonnement_id=a["id"],
                                 action="Créer le bail dans la console, ou arrêter l'abonnement",
                                 montant=round(a["montant_ht"] * occurrences_par_an(a), 2)))
     attendu = round(sum(s.attendu_annuel for s in situations), 2)
