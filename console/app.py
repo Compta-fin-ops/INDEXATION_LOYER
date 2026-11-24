@@ -322,12 +322,15 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
                                            "indice": f"{b['indice']} {l.echeance.trimestre_reference}",
                                            "publie": l.indice_reference is not None, "gel": est_gel(l.decision),
                                            "avant": l.loyer_precedent, "apres": l.loyer_retenu, "variation": l.variation_pct,
-                                           "courrier_le": d.get("courrier_le"), "commentaire": d.get("commentaire") or ""})
+                                           "courrier_le": d.get("courrier_le"), "commentaire": d.get("commentaire") or "",
+                                           "valeur": l.indice_reference, "precedent": l.trimestre_precedent_effectif,
+                                           "valeur_precedente": l.indice_precedent, "decision_saisie": bool(d)})
                 elif b.get("date_prochaine_revision"):            # bail aux valeurs importées : pas de détail de calcul
                     candidates.append({"date": rp._d(b["date_prochaine_revision"]), "numero": None, "indice": b.get("indice") or "",
                                        "publie": b.get("loyer_prochain_annuel") is not None, "gel": False,
                                        "avant": b.get("loyer_attendu_annuel"), "apres": b.get("loyer_prochain_annuel"),
-                                       "variation": None, "courrier_le": None, "commentaire": ""})
+                                       "variation": None, "courrier_le": None, "commentaire": "", "valeur": None,
+                                       "precedent": "", "valeur_precedente": None, "decision_saisie": False})
                 for c in candidates:
                     jours = (c["date"] - jour()).days
                     if jours > horizon:
@@ -728,6 +731,23 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
             referentiel.enregistrer_decision(cx, dict(b), numero, d.get("decision") or DECISIONS[0], d.get("commentaire") or "", envoye_le)
             n += 1
         return RedirectResponse(retour + "&" + urllib.parse.urlencode({"message": f"{n} courrier(s) daté(s) comme envoyé(s)."}), status_code=303)
+
+    # ------------------------------------------- situation des loyers, pour le bailleur
+    @app.get("/dossiers/{code}/situation-loyers.pdf")
+    def situation_loyers(code: str):
+        """À date : loyers en cours, nouveaux loyers connus à soumettre au bailleur, révisions en attente d'indice."""
+        d = dossier_ou_404(code)
+        an = analyses(code)
+        lignes = [l for l in pilotage(an, 3650)]
+        suivis = {l["bail"]["id"] for l in lignes}
+        autres = [s.bail for s in an[0]["situations"] if s.bail["id"] not in suivis and not s.bail.get("date_sortie")]
+        if not lignes and not autres:
+            raise HTTPException(404, "Aucun bail dans ce dossier.")
+        contenu = editions.situation_loyers(d, lignes, autres, jour(), fictif=d["source_referentiel"] == FICTIF)
+        referentiel.tracer(cx, "Situation des loyers éditée", f"{len(lignes) + len(autres)} ligne(s)", code)
+        cx.commit()
+        return Response(contenu, media_type="application/pdf", headers={
+            "Content-Disposition": f'inline; filename="{code}_situation_loyers_{jour():%Y-%m-%d}.pdf"'})
 
     # ---------------------------------------------------- état annuel des révisions
     @app.get("/dossiers/{code}/etat-revisions.pdf")

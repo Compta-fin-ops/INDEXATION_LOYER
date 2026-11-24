@@ -441,3 +441,41 @@ def test_courriers_en_lot_et_etat_annuel(console, indices):
     assert e27[0]["nature"] == "Gelée, sans rattrapage" and e27[0]["commentaire"] == "accord du bailleur" and e27[0]["courrier_le"] == "2026-12-22"
     assert e27[0]["loyer_fin"] == pytest.approx(26140.11, abs=0.01)                               # gelé : loyer maintenu
     assert e27[1]["nature"] == "Appliquée" and e27[1]["loyer_fin"] == pytest.approx(13070.06 * 139.00 / 137.29, abs=0.02)
+
+
+def test_situation_des_loyers_pour_le_bailleur(console, indices):
+    """À date : nouveaux loyers connus à décider, révisions en attente d'indice, autres baux."""
+    from console import editions
+    c, cx, bail_id, _ = console
+    c.post("/dossiers/HALLES/baux", data={**BAIL, "code": "B02", "locataire": "Opticien Durand", "loyer_initial_annuel": "12000"})
+    c.post("/dossiers/HALLES/baux", data={**BAIL, "code": "B03", "locataire": "Parti", "date_sortie": "2026-06-30"})
+    r = c.get("/dossiers/HALLES/situation-loyers.pdf")
+    assert r.status_code == 200 and r.content.startswith(b"%PDF") and "HALLES_situation_loyers_2026-11-22.pdf" in r.headers["content-disposition"]
+    # l'indice paraît ; le bailleur gèle B01, B02 reste à décider
+    insee.ecrire_cache([insee.Observation("ILC", "001532540", t, v, "A", "2026-12-20", "TEST", "2026-12-21")
+                        for t, v in {**ILC, "2026-T4": 139.00}.items()], indices)
+    c.post(f"/baux/{bail_id}/revisions/4", data={"decision": "Geler – sans rattrapage", "commentaire": "accord du bailleur"})
+    lignes = [
+        {"date": date(2027, 4, 1), "etat": "a_faire", "gel": True, "decision_saisie": True, "commentaire": "accord du bailleur", "courrier_le": None,
+         "bail": {"code": "B01", "locataire": "Boulangerie Martin", "local": "x"}, "indice": "ILC 2026-T4", "valeur": 139.0, "precedent": "2025-T4",
+         "valeur_precedente": 137.29, "avant": 26140.11, "apres": 26140.11, "variation": 0.0},
+        {"date": date(2027, 4, 1), "etat": "a_faire", "gel": False, "decision_saisie": False, "commentaire": "", "courrier_le": None,
+         "bail": {"code": "B02", "locataire": "Opticien Durand", "local": "x"}, "indice": "ILC 2026-T4", "valeur": 139.0, "precedent": "2025-T4",
+         "valeur_precedente": 137.29, "avant": 13070.06, "apres": 13232.85, "variation": 0.01246},
+        {"date": date(2026, 10, 1), "etat": "retard", "gel": False, "decision_saisie": False, "commentaire": "", "courrier_le": None,
+         "bail": {"code": "B04", "locataire": "En retard", "local": "x"}, "indice": "ILAT 2026-T2", "valeur": None, "precedent": "2025-T2",
+         "valeur_precedente": 137.0, "avant": 9000.0, "apres": None, "variation": None},
+        {"date": date(2027, 1, 1), "etat": "faite", "gel": False, "decision_saisie": True, "commentaire": "", "courrier_le": "2026-11-20",
+         "bail": {"code": "B05", "locataire": "Prêt", "local": "x"}, "indice": "ILC 2026-T3", "valeur": 138.0, "precedent": "2025-T3",
+         "valeur_precedente": 137.0, "avant": 5000.0, "apres": 5036.5, "variation": 0.0073},
+    ]
+    g = editions.repartir(lignes)
+    assert [l["bail"]["code"] for l in g["connus"]] == ["B01", "B02"] and [l["bail"]["code"] for l in g["attente"]] == ["B04"]
+    assert [l["bail"]["code"] for l in g["traites"]] == ["B05"]
+    pdf = editions.situation_loyers({"nom": "SCI des Halles", "siren": "123456789"}, lignes,
+                                    [{"code": "B09", "locataire": "Sans révision", "local": "x", "loyer_attendu_annuel": 7000.0}], AUJ)
+    assert pdf.startswith(b"%PDF") and len(pdf) > 2500
+    # la page réelle reflète la même situation : B01 gelé et B02 à décider, B03 sorti n'y figure pas
+    r = c.get("/dossiers/HALLES/situation-loyers.pdf")
+    assert r.status_code == 200 and c.get("/dossiers/INCONNU/situation-loyers.pdf").status_code == 404
+    assert "Situation des loyers à ce jour" in c.get("/dossiers/HALLES").text

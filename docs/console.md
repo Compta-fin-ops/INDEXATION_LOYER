@@ -50,6 +50,7 @@ de l'ancien classeur. Un test vérifie que la console retrouve, bail par bail, l
 |---|---|---|
 | Courrier d'une révision | Page du bail, tableau « Révisions » | Un PDF : application, gel ou attente d'indice |
 | Courriers en lot | Tableau de bord, « Éditer les courriers en lot » | Un ZIP d'un PDF par locataire, pour toutes les révisions à préparer ; puis la date d'envoi, posée d'un geste sur les courriers cochés |
+| Situation des loyers à ce jour | Page du dossier, bloc « Éditions » | Un PDF pour le bailleur : les nouveaux loyers connus avec l'écart annuel et deux cases « Appliquer » ou « Geler » à cocher, les révisions en attente d'indice, les autres baux. Une décision déjà saisie dans la console y figure à la place des cases |
 | État annuel des révisions | Page du dossier, bloc « Éditions » | Un PDF par société et par année : pour chaque bail la révision de l'année, les indices, le coefficient, le loyer avant et après, la suite donnée, et le total |
 
 La console édite ; elle n'envoie rien. La date d'envoi d'un courrier est celle que vous posez.
