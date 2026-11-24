@@ -136,6 +136,17 @@ python -m console serve                # http://127.0.0.1:8000
 
 Sur Windows, sans ligne de commande : double-clic sur `lancer_console.bat`, voir [installation.md](installation.md).
 
+## Tester la connexion d'un dossier à Pennylane
+
+Page du dossier, bouton « Tester la connexion Pennylane ». Deux lectures, aucune écriture : l'identité du jeton
+(`GET /me`), puis une page d'abonnements. La page affiche le code de chaque réponse, la réponse brute de
+l'identité, et si elle porte la marque d'un environnement de test Pennylane. Le jeton n'est jamais affiché.
+
+Pour s'exercer sans enjeu : créer son environnement de test dans Pennylane (« Mon compte », « Environnements de
+test »), y générer un jeton (« Paramètres entreprise », « Connectivité », onglet « Développeurs »), le déclarer
+sur le poste dans une variable `PENNYLANE_TOKEN_SANDBOX`, et créer dans la **base de test** de la console un
+dossier `SANDBOX` qui porte ce nom de variable.
+
 ## Passer aux dossiers réels
 
 ```bash
@@ -173,6 +184,7 @@ par échéance est le plus proche.
 | Lecture des abonnements : pagination par curseur, champs, valeurs nulles | Conforme à l'OpenAPI « List billing subscriptions » du 2026-05-27, fournie par le cabinet |
 | Lecture des factures : pagination, champs, valeurs nulles, filtre sur la date | Conforme à l'OpenAPI « List customer invoices » du 2026-05-27, fournie par le cabinet. Les factures de plus de 36 mois ne sont pas collectées |
 | Avoirs, proformas et devis présents dans la liste des factures | Collectés avec leur statut, écartés du rapprochement. **Signe des montants d'un avoir : inconnu** |
+| Environnement de test Pennylane (Sandbox) | Existe selon le centre d'aide : un dossier de démonstration par utilisateur, nommé « Sandbox - votre email », avec son propre jeton d'API. La console sait tester la connexion d'un dossier en lecture seule et reconnaître cette marque. **Schéma de la route d'identité non vérifié** ; aucune création n'y a encore été faite |
 | Jeton cabinet | La doc indique qu'un jeton cabinet est accepté sur l'API v2 avec l'en-tête `X-Company-Id`. Non exploité : la console utilise un jeton par dossier |
 | Appel réel à Pennylane | **Jamais exécuté**, faute de jeton |
 

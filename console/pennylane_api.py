@@ -88,6 +88,20 @@ def normaliser_facture(f: dict) -> dict:
     }
 
 
+def marques_sandbox(corps, chemin: str = "") -> list[str]:
+    """Chemins des valeurs de la réponse qui commencent par « sandbox » (nom du dossier, immatriculation…)."""
+    trouvees: list[str] = []
+    if isinstance(corps, dict):
+        for cle, valeur in corps.items():
+            trouvees += marques_sandbox(valeur, f"{chemin}.{cle}" if chemin else str(cle))
+    elif isinstance(corps, list):
+        for i, valeur in enumerate(corps):
+            trouvees += marques_sandbox(valeur, f"{chemin}[{i}]")
+    elif isinstance(corps, str) and corps.strip().lower().startswith("sandbox"):
+        trouvees.append(f"{chemin} = {corps}")
+    return trouvees
+
+
 class ClientReel:
     """API Entreprise v2. Le jeton de chaque dossier est lu dans la variable d'environnement
     déclarée pour ce dossier (table dossiers.variable_jeton) : il n'est jamais stocké."""
@@ -135,6 +149,48 @@ class ClientReel:
             else:
                 return
             time.sleep(PAUSE_ENTRE_APPELS)
+
+    def _lire(self, dossier: str, chemin: str, params: dict | None = None) -> tuple[int | None, Any, str]:
+        """Une seule lecture, sans rien lever : (code HTTP ou None, corps décodé ou None, message d'erreur)."""
+        url = f"{self.base_url}{chemin}" + ("?" + urllib.parse.urlencode(params) if params else "")
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {self._jeton(dossier)}", "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8")), ""
+        except urllib.error.HTTPError as e:
+            try:
+                detail = json.loads(e.read().decode("utf-8"))
+                message = str(detail.get("error") or detail.get("message") or detail)[:300]
+            except Exception:
+                message = e.reason if isinstance(e.reason, str) else ""
+            return e.code, None, message
+        except Exception as e:                           # réseau, délai dépassé, réponse illisible
+            return None, None, f"{type(e).__name__} : {e}"[:300]
+
+    def tester_connexion(self, dossier: str) -> dict:
+        """Deux lectures, aucune écriture : l'identité du jeton (GET /me), puis une page d'abonnements.
+
+        `sandbox` est vrai si l'identité renvoyée porte la marque d'un environnement de test Pennylane :
+        le centre d'aide indique qu'il est créé sous le nom « Sandbox - votre email ». Le schéma de /me
+        n'ayant pas été vérifié, la recherche porte sur toutes les valeurs de la réponse, affichée telle quelle."""
+        bilan: dict = {"variable": self.variables_jeton.get(dossier, ""), "jeton_present": False, "sandbox": False,
+                       "marques": [], "identite": None, "me": None, "abonnements": None}
+        try:
+            self._jeton(dossier)
+        except RuntimeError as exc:
+            bilan["erreur"] = str(exc)
+            return bilan
+        bilan["jeton_present"] = True
+        code, corps, message = self._lire(dossier, "/me")
+        bilan["me"] = {"code": code, "message": message}
+        if corps is not None:
+            bilan["identite"] = corps
+            bilan["marques"] = marques_sandbox(corps)
+            bilan["sandbox"] = bool(bilan["marques"])
+        code, corps, message = self._lire(dossier, "/billing_subscriptions", {"limit": 1})
+        bilan["abonnements"] = {"code": code, "message": message,
+                                "lisible": isinstance(corps, dict) and isinstance(corps.get("items"), list)}
+        return bilan
 
     def abonnements(self, dossier: str) -> list[dict]:
         return [normaliser_abonnement(a) for a in self._pages(dossier, "/billing_subscriptions")]

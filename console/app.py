@@ -393,6 +393,23 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         cx.commit()
         return RedirectResponse(f"/dossiers/{code}", status_code=303)
 
+    @app.post("/dossiers/{code}/connexion-pennylane", response_class=HTMLResponse)
+    def dossier_tester_connexion(request: Request, code: str):
+        """Lecture seule : vérifie le jeton du dossier et montre à quelle société Pennylane il donne accès."""
+        from .pennylane_api import ClientReel
+        d = dossier_ou_404(code)
+        if d["source_referentiel"] == FICTIF:
+            raise HTTPException(409, "Dossier fictif : aucune connexion à Pennylane.")
+        bilan = ClientReel({code: d["variable_jeton"]}).tester_connexion(code)
+        issue = ("jeton absent" if not bilan["jeton_present"] else
+                 f"identité HTTP {bilan['me']['code']}, abonnements HTTP {bilan['abonnements']['code']}"
+                 + (", environnement de test reconnu" if bilan["sandbox"] else ""))
+        referentiel.tracer(cx, "Connexion Pennylane testée", issue, code)
+        cx.commit()
+        return gabarits.TemplateResponse(request, "connexion_pennylane.html", contexte(
+            request, page="bord", d=d, b=bilan,
+            brut=json.dumps(bilan["identite"], ensure_ascii=False, indent=2) if bilan["identite"] is not None else None))
+
     # ---------------------------------------------------------------------- baux
     def ligne_bail(bail_id: int) -> dict:
         ligne = cx.execute("SELECT * FROM baux WHERE id=?", (bail_id,)).fetchone()
