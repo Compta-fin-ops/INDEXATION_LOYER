@@ -370,3 +370,72 @@ def test_bail_cree_depuis_un_abonnement_ventile_et_decalage_d_un_mois(base):
     cx.commit()
     creation = c.get(f"/baux/{bail_id}/abonnement").text
     assert "Dernière échéance le 01/12/2026, avant la réindexation du 01/01/2027" in creation and "<dd>01/01/2027</dd>" in creation
+
+
+def _grand_livre_xlsx(lignes):
+    import io
+    from datetime import datetime
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Grand livre"
+    ws.append(["N° de compte", "Libellé de compte", "Date", "Journal", "Libellé de pièce", "N° de facture", "Let.", "Débit", "Crédit", "Solde"])
+    soldes = {}
+    for compte, libelle, jour, journal, piece, lettre, debit, credit in lignes:
+        soldes[compte] = round(soldes.get(compte, 0) + debit - credit, 2)
+        ws.append([compte, libelle, datetime.fromisoformat(jour), journal, piece, "", lettre, debit, credit, soldes[compte]])
+    tampon = io.BytesIO()
+    wb.save(tampon)
+    return tampon.getvalue()
+
+
+def test_grand_livre_comptes_clients_rattachement_et_courrier(base):
+    """Grand livre déposé : seuls les 411 sont gardés ; rattachement suggéré par le nom ; solde, non-lettré, courrier."""
+    from console import grand_livre
+    _, c, cx, chemin = base(True)
+    contenu = _grand_livre_xlsx([
+        ("401000002", "ORANGE", "2026-01-04", "HA", "Facture Orange", "A", 0.0, 71.99),
+        ("411000005", "BOULANGERIE MARTIN", "2026-10-01", "VT", "Loyer octobre", "A", 2472.0, 0.0),
+        ("411000005", "BOULANGERIE MARTIN", "2026-10-05", "BQ1", "VIR BOULANGERIE MARTIN", "A", 0.0, 2472.0),
+        ("411000005", "BOULANGERIE MARTIN", "2026-11-01", "VT", "Loyer novembre", "", 2472.0, 0.0),
+        ("411000005", "BOULANGERIE MARTIN", "2026-11-05", "BQ1", "VIR BOULANGERIE MARTIN", "", 0.0, 2437.75),
+        ("411000009", "CABINET DURAND", "2026-11-01", "VT", "Loyer", "B", 1200.0, 0.0),
+        ("70800000", "LOYERS", "2026-11-01", "VT", "Loyer", "", 0.0, 2472.0)])
+    lu = grand_livre.lire("X_Grand_livre_2026_01_01_2026_12_31.xlsx", contenu)
+    assert (lu["comptes"], len(lu["lignes"]), lu["total_lignes"]) == (2, 5, 7)
+    assert (lu["du"].isoformat(), lu["au"].isoformat()) == ("2026-01-01", "2026-12-31")
+    with pytest.raises(grand_livre.GrandLivreRefuse, match="pas un classeur"):
+        grand_livre.lire("x.xlsx", b"%PDF-1.7 ...")
+    with pytest.raises(grand_livre.GrandLivreRefuse, match="Colonnes inattendues"):
+        grand_livre.lire("x.xlsx", _autre_classeur())
+    # dépôt par la page de la société
+    r = c.post("/dossiers/HALLES/grand-livre", files={"fichier": ("Grand_livre_2026_01_01_2026_12_31.xlsx", contenu,
+                                                                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert r.status_code == 200 and "2 compte(s) client, 5 écriture(s) sur 7" in r.text
+    assert cx.execute("SELECT COUNT(*) FROM grand_livre WHERE compte NOT LIKE '411%'").fetchone()[0] == 0
+    page = c.get("/dossiers/HALLES/grand-livre").text
+    assert "suggestion d'après le nom" in page and '<option value="1" selected>' in page      # BOULANGERIE MARTIN → B01
+    assert c.post("/dossiers/HALLES/grand-livre/rattacher", data={"compte_411000005": "1", "compte_411000009": "1"}).status_code == 400
+    r = c.post("/dossiers/HALLES/grand-livre/rattacher", data={"compte_411000005": "1", "compte_411000009": "2"})
+    assert "2 compte(s) client rattaché(s)" in r.text
+    assert cx.execute("SELECT compte_client FROM baux WHERE id=1").fetchone()[0] == "411000005"
+    fiche = c.get("/baux/1").text
+    assert "34,25" in fiche and "dû par le locataire" in fiche and "Courrier de demande de régularisation" in fiche
+    assert "Compte client : 34,25" in c.get("/").text
+    pdf = c.get("/baux/1/compte.pdf?courrier=1")
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF") and "compte_regularisation" in pdf.headers["content-disposition"]
+    assert c.get("/baux/2/compte.pdf").status_code == 200
+    # un nouveau dépôt remplace le précédent ; un compte disparu laisse le bail sans extrait
+    c.post("/dossiers/HALLES/grand-livre", files={"fichier": ("gl.xlsx", _grand_livre_xlsx([
+        ("411000005", "BOULANGERIE MARTIN", "2026-12-01", "VT", "Loyer", "", 2472.0, 0.0)]), "application/octet-stream")})
+    assert c.get("/baux/2/compte.pdf").status_code == 404 and "absent du dernier grand livre" in c.get("/baux/2").text
+
+
+def _autre_classeur():
+    import io
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.active.append(["Compte", "Montant"])
+    t = io.BytesIO()
+    wb.save(t)
+    return t.getvalue()

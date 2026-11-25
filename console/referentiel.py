@@ -27,7 +27,7 @@ NATURES_PIECE = ("Bail", "Avenant", "Courrier", "État des lieux", "Autre")
 CHAMPS_BAIL = ("code", "local", "locataire", "adresse_locataire", "type_bail", "date_effet", "duree_ans", "date_fin",
                "date_sortie", "loyer_initial_annuel", "charges_annuelles", "tva_pct", "periodicite", "indice",
                "trimestre_base", "periodicite_revision_ans", "methode", "plafond_annuel_pct", "customer_id",
-               "subscription_id", "notes", "reprise_date", "reprise_loyer_annuel", "reprise_trimestre", "mention_historique")
+               "subscription_id", "notes", "reprise_date", "reprise_loyer_annuel", "reprise_trimestre", "mention_historique", "compte_client")
 CHAMPS_CALENDRIER = ("date_effet", "periodicite_revision_ans", "reprise_date")   # ils fixent la numérotation des révisions
 CHAMPS_CALCULES = ("loyer_attendu_annuel", "date_derniere_revision", "date_prochaine_revision", "loyer_prochain_annuel",
                    "date_revision_suivante", "statut_revision", "loyer_precedent_annuel")
@@ -42,6 +42,7 @@ LIBELLES = {
     "reprise_date": "Reprise : date de la dernière révision", "reprise_loyer_annuel": "Reprise : loyer annuel HT à cette date",
     "reprise_trimestre": "Reprise : trimestre de l'indice appliqué",
     "mention_historique": "Historique à reporter sur les factures",
+    "compte_client": "Compte client (grand livre)",
 }
 MOIS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
 FREQUENCE = {1: "annuelle", 2: "biennale", 3: "triennale"}
@@ -240,6 +241,9 @@ def valider(champs: dict[str, str]) -> tuple[dict, list[str]]:
     v: dict = {"code": t("code").upper(), "local": t("local"), "locataire": t("locataire"),
                "adresse_locataire": t("adresse_locataire"), "notes": t("notes"),
                "mention_historique": "\n".join(x.strip() for x in t("mention_historique").splitlines() if x.strip())}
+    v["compte_client"] = t("compte_client").replace(" ", "")
+    if v["compte_client"] and not (v["compte_client"].isdigit() and v["compte_client"].startswith("411")):
+        e.append("Compte client : numéro de compte 411… attendu, chiffres seulement.")
     if len(v["mention_historique"]) > LONGUEUR_HISTORIQUE:
         e.append(f"Historique à reporter sur les factures : {LONGUEUR_HISTORIQUE} caractères au plus.")
     for nom in ("code", "local", "locataire"):

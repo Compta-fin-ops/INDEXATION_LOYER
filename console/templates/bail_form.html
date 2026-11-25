@@ -57,6 +57,7 @@
   <h2>Pennylane et notes</h2>
   <div class="formulaire">
     <label>Identifiant du client Pennylane<input name="customer_id" value="{{ b.customer_id if b.customer_id is not none else '' }}" inputmode="numeric"><span class="aide">Sert à rattacher les abonnements et les factures du locataire.</span></label>
+    <label>Compte client du grand livre<input name="compte_client" value="{{ b.compte_client or '' }}" inputmode="numeric" placeholder="411000005"><span class="aide">Le compte 411 du locataire. Se rattache aussi depuis la page « Grand livre » de la société.</span></label>
     <label>Identifiant de l'abonnement<input name="subscription_id" value="{{ b.subscription_id if b.subscription_id is not none else '' }}" inputmode="numeric"><span class="aide">Seulement si un même client porte plusieurs baux.</span></label>
     <label class="large">Notes<textarea name="notes" rows="3">{{ b.notes or '' }}</textarea></label>
   </div>

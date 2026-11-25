@@ -42,6 +42,7 @@
   <p style="margin: 0">État annuel des révisions de loyer :
     {% for an in (aujourdhui.year, aujourdhui.year - 1) %}<a class="fort" href="/dossiers/{{ a.dossier.code }}/etat-revisions.pdf?annee={{ an }}">{{ an }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
     · <a href="/courriers?dossier={{ a.dossier.code }}">courriers de réindexation à éditer</a></p>
+  <p style="margin: 8px 0 0"><a class="fort" href="/dossiers/{{ a.dossier.code }}/grand-livre">Comptes clients du grand livre</a> : déposer l'export de Pennylane, rattacher chaque compte 411 à son bail, éditer un extrait de compte ou un courrier de régularisation.</p>
 </div>
 <div class="carte"><h2>Écarts du dossier</h2>{{ E.lignes(a.ecarts, avec_dossier=False) }}</div>
 {% endblock %}

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block titre %}Grand livre · {{ d.nom }} · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="fil"><a href="/">Baux</a> / <a href="/dossiers/{{ d.code }}">{{ d.nom }}</a> / Grand livre</div>
+<h1>Comptes clients du grand livre</h1>
+<p class="sous-titre">{{ d.nom }} · le compte de chaque locataire, tel qu'il figure en comptabilité : factures, règlements, lettrage, solde.</p>
+{% if erreur %}<div class="bandeau erreur">{{ erreur }}</div>{% endif %}
+{% if message %}<div class="bandeau succes">{{ message }}</div>{% endif %}
+<div class="deux">
+  <div class="carte">
+    <h2>Dernier grand livre déposé</h2>
+    {% if imp %}
+    <dl class="fiche">
+      <dt>Fichier</dt><dd>{{ imp.nom_fichier }}</dd>
+      <dt>Période</dt><dd>du {{ imp.du | date_fr }} au {{ imp.au | date_fr }}</dd>
+      <dt>Comptes clients</dt><dd>{{ imp.comptes }} compte(s), {{ imp.lignes }} écriture(s)</dd>
+      <dt>Déposé le</dt><dd>{{ imp.horodatage[:10] | date_fr }} à {{ imp.horodatage[11:16] }}{% if imp.auteur %} par {{ imp.auteur }}{% endif %}</dd>
+    </dl>
+    {% else %}<p class="discret" style="margin: 0">Aucun grand livre déposé pour cette société.</p>{% endif %}
+  </div>
+  <div class="carte">
+    <h2>Déposer le grand livre</h2>
+    <form method="post" action="/dossiers/{{ d.code }}/grand-livre" enctype="multipart/form-data" class="depot">
+      <input type="file" name="fichier" accept=".xlsx" required aria-label="Grand livre">
+      <button type="submit">Déposer</button>
+    </form>
+    <p class="discret petit" style="margin: 8px 0 0">L'export « Grand livre » de Pennylane, au format xlsx. Seuls les comptes clients (411) sont conservés ; le fichier remplace le précédent. Le solde d'un compte est celui de la période exportée : exporter depuis l'ouverture de l'exercice, ou depuis une date où les comptes étaient soldés.</p>
+  </div>
+</div>
+{% if comptes %}
+<form method="post" action="/dossiers/{{ d.code }}/grand-livre/rattacher">
+<div class="carte">
+  <h2>Rattacher chaque compte à son bail</h2>
+  <div class="defile"><table>
+    <thead><tr><th>Compte</th><th>Libellé</th><th class="num">Solde</th><th class="num">Débit non lettré</th><th class="num">Crédit non lettré</th><th>Bail</th></tr></thead>
+    <tbody>
+    {% for x in comptes %}{% set choisi = x.bail_id or x.suggestion %}
+    <tr>
+      <td class="fort">{{ x.compte }}</td><td>{{ x.libelle }}<div class="discret petit">{{ x.lignes }} écriture(s), dernière le {{ x.derniere | date_fr }}</div></td>
+      <td class="num {{ 'negatif' if x.solde > 0.005 }}">{{ x.solde | eur2 }}</td>
+      <td class="num">{{ x.debit_non_lettre | eur2 }}</td><td class="num">{{ x.credit_non_lettre | eur2 }}</td>
+      <td><select name="compte_{{ x.compte }}" aria-label="Bail du compte {{ x.compte }}">
+          <option value="">— aucun —</option>
+          {% for b in baux %}<option value="{{ b.id }}"{{ ' selected' if choisi == b.id }}>{{ b.code }} · {{ b.locataire }}</option>{% endfor %}
+        </select>{% if x.suggestion and not x.bail_id %}<div class="discret petit">suggestion d'après le nom, à confirmer</div>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="actions"><button class="principal" type="submit">Enregistrer les rattachements</button></p>
+  <p class="discret petit" style="margin: 0">Solde positif : le locataire doit cette somme. Crédit non lettré : un règlement que la comptabilité n'a pas encore rapproché d'une facture, souvent un virement d'un montant différent de l'échéance.</p>
+</div>
+</form>
+{% endif %}
+{% endblock %}

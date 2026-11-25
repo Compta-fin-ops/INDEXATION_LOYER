@@ -110,6 +110,19 @@
   <span class="discret petit">Rien n'est envoyé à cette étape : la page suivante affiche les contrôles et demande une confirmation.</span></p>
 </div>
 {% endif %}
+<div class="carte">
+  <h2>Compte client en comptabilité</h2>
+  {% if compte %}
+  <dl class="fiche">
+    <dt>Compte</dt><dd>{{ compte.compte }} · {{ compte.libelle }}</dd>
+    <dt>Solde</dt><dd class="{{ 'negatif fort' if compte.solde > 0.005 }}">{{ compte.solde | eur2 }}{{ ' dû par le locataire' if compte.solde > 0.005 else ' en faveur du locataire' if compte.solde < -0.005 else '' }}</dd>
+    <dt>Non lettré</dt><dd>{{ compte.debit_non_lettre | eur2 }} au débit · {{ compte.credit_non_lettre | eur2 }} au crédit</dd>
+    <dt>Grand livre</dt><dd>du {{ gl.du | date_fr }} au {{ gl.au | date_fr }}, déposé le {{ gl.horodatage[:10] | date_fr }}</dd>
+  </dl>
+  <p class="petit" style="margin: 10px 0 0"><a href="/baux/{{ sit.bail.id }}/compte.pdf">Extrait du compte PDF</a>{% if compte.solde > 0.005 %} · <a class="fort" href="/baux/{{ sit.bail.id }}/compte.pdf?courrier=1">Courrier de demande de régularisation</a>{% endif %}</p>
+  {% elif sit.bail.compte_client %}<p class="discret" style="margin: 0">Compte {{ sit.bail.compte_client }} absent du dernier grand livre déposé. <a href="/dossiers/{{ sit.bail.dossier }}/grand-livre">Déposer un grand livre</a>.</p>
+  {% else %}<p class="discret" style="margin: 0">Aucun compte client rattaché. <a href="/dossiers/{{ sit.bail.dossier }}/grand-livre">Déposer le grand livre et rattacher les comptes</a>.</p>{% endif %}
+</div>
 {% if mention %}
 <div class="carte">
   <h2>Mention portée sur les factures</h2>

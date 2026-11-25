@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS baux (
     reprise_loyer_annuel REAL,               -- loyer annuel HT en vigueur à cette date
     reprise_trimestre TEXT,                  -- trimestre de l'indice appliqué à cette révision
     mention_historique TEXT DEFAULT '',      -- historique antérieur à la reprise, reporté sur les factures
+    compte_client TEXT DEFAULT '',           -- compte 411 du locataire dans le grand livre
     UNIQUE (dossier, code)
 );
 CREATE TABLE IF NOT EXISTS decisions (             -- décision du bailleur sur une échéance de révision
@@ -156,6 +157,29 @@ CREATE TABLE IF NOT EXISTS envois (                 -- journal des créations d'
     lot TEXT DEFAULT '',                             -- créations confirmées ensemble : même identifiant de lot
     verification TEXT DEFAULT ''                     -- montant relu dans la réponse de Pennylane, comparé au montant envoyé
 );
+CREATE TABLE IF NOT EXISTS grand_livre (           -- lignes des comptes clients (411) du dernier grand livre déposé
+    dossier TEXT NOT NULL REFERENCES dossiers(code) ON DELETE CASCADE,
+    compte TEXT NOT NULL,
+    libelle TEXT DEFAULT '',
+    date TEXT NOT NULL,
+    journal TEXT DEFAULT '',
+    piece TEXT DEFAULT '',
+    facture TEXT DEFAULT '',
+    lettrage TEXT DEFAULT '',
+    debit REAL DEFAULT 0,
+    credit REAL DEFAULT 0,
+    solde REAL DEFAULT 0                             -- solde courant du compte, tel qu'exporté
+);
+CREATE TABLE IF NOT EXISTS grand_livre_imports (   -- dernier grand livre déposé, par dossier
+    dossier TEXT PRIMARY KEY REFERENCES dossiers(code) ON DELETE CASCADE,
+    horodatage TEXT NOT NULL,
+    auteur TEXT DEFAULT '',
+    nom_fichier TEXT DEFAULT '',
+    du TEXT,
+    au TEXT,
+    lignes INTEGER DEFAULT 0,
+    comptes INTEGER DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS reglages (              -- réglages portés par la base elle-même
     cle TEXT PRIMARY KEY,
     valeur TEXT NOT NULL
@@ -189,6 +213,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     expire_le TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_envois_cle ON envois(cle);
+CREATE INDEX IF NOT EXISTS ix_grand_livre ON grand_livre(dossier, compte);
 CREATE INDEX IF NOT EXISTS ix_pieces_bail ON pieces(bail_id);
 CREATE INDEX IF NOT EXISTS ix_historique_bail ON historique(bail_id);
 CREATE INDEX IF NOT EXISTS ix_baux_dossier ON baux(dossier);
@@ -206,7 +231,7 @@ MIGRATIONS = {
              ("methode", "TEXT DEFAULT 'Chaînée'"), ("plafond_annuel_pct", "REAL"), ("duree_ans", "INTEGER"),
              ("date_sortie", "TEXT"), ("notes", "TEXT DEFAULT ''"),
              ("reprise_date", "TEXT"), ("reprise_loyer_annuel", "REAL"), ("reprise_trimestre", "TEXT"),
-             ("mention_historique", "TEXT DEFAULT ''")),
+             ("mention_historique", "TEXT DEFAULT ''"), ("compte_client", "TEXT DEFAULT ''")),
     "envois": (("auteur", "TEXT DEFAULT ''"), ("nature", "TEXT DEFAULT 'abonnement'"), ("facture_id", "INTEGER"),
                ("lot", "TEXT DEFAULT ''"), ("verification", "TEXT DEFAULT ''")),
     "abonnements": (("parametres", "TEXT DEFAULT ''"),),

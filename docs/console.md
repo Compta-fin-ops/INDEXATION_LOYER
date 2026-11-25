@@ -150,6 +150,26 @@ charges, celles qui parlent de loyer forment le loyer, la TVA de la ligne de loy
 pré-rempli est celui facturé aujourd'hui : si le bail a déjà été révisé, saisir le loyer d'origine ou la reprise.
 La date d'effet et l'indice restent à saisir d'après le bail.
 
+### Comptes clients : le grand livre
+
+La page « Grand livre » d'une société (lien sur l'accueil et sur la fiche société) reçoit l'export « Grand livre »
+de Pennylane, au format xlsx, déposé à la main : aucun appel à Pennylane. Seules les lignes des comptes 411 sont
+conservées, le reste du fichier n'est pas stocké ; un nouveau dépôt remplace le précédent.
+
+Chaque compte 411 se rattache à son bail ; la console suggère le bail dont le locataire porte le même nom, à
+confirmer. Sur la fiche du bail : solde, débit et crédit non lettrés, extrait du compte en PDF, et, si le
+locataire doit une somme, le courrier de demande de régularisation avec l'extrait en annexe. Sur l'accueil, un
+solde dû apparaît dans la colonne d'état du bail.
+
+À la différence du relevé des factures, l'extrait du grand livre montre les règlements tels qu'ils sont arrivés,
+lettrés ou non : un virement d'un montant différent de l'échéance y figure, au lieu de faire paraître la facture
+impayée. Le solde est celui de la période exportée : il n'y a pas de ligne de report dans l'export constaté.
+Exporter depuis l'ouverture de l'exercice, ou depuis une date où les comptes étaient soldés.
+
+Format constaté sur un export réel (dossier de test) : une feuille, colonnes « N° de compte, Libellé de compte,
+Date, Journal, Libellé de pièce, N° de facture, Let., Débit, Crédit, Solde ». Un fichier dont les colonnes
+diffèrent est refusé. Le signe « ↔ » qui suit parfois une lettre de lettrage n'est pas documenté.
+
 ## Le principe de facturation : un abonnement par période d'indexation
 
 La question « comment changer le loyer à la date anniversaire » est réglée par la structure, pas par une

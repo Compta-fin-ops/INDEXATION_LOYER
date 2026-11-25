@@ -37,7 +37,7 @@
   <summary>
     <span class="nom"><span class="fort">{{ a.dossier.nom }}</span> <span class="discret petit">{{ a.dossier.code }} · {{ a.nb_baux }} bail/baux</span></span>
     <span class="etats">{% if x.orphelins %}<span class="pastille a_traiter">{{ x.orphelins | length }} abonnement(s) sans bail</span> {% endif %}{% for f, libelle in FILTRES.items() if x.compte[f] %}<span class="pastille {{ {'corriger': 'bloquant', 'regulariser': 'a_traiter', 'preparer': 'a_traiter', 'attente': 'neutre'}[f] }}">{{ x.compte[f] }} {{ libelle | lower }}</span> {% endfor %}</span>
-    <span class="liens petit"><a href="/dossiers/{{ a.dossier.code }}">Fiche</a> · <a href="/dossiers/{{ a.dossier.code }}/modifier">Modifier la société</a> · <a href="/dossiers/{{ a.dossier.code }}/baux/nouveau">Nouveau bail</a> · <a href="/dossiers/{{ a.dossier.code }}/situation-loyers.pdf">Situation PDF</a></span>
+    <span class="liens petit"><a href="/dossiers/{{ a.dossier.code }}">Fiche</a> · <a href="/dossiers/{{ a.dossier.code }}/modifier">Modifier la société</a> · <a href="/dossiers/{{ a.dossier.code }}/baux/nouveau">Nouveau bail</a> · <a href="/dossiers/{{ a.dossier.code }}/situation-loyers.pdf">Situation PDF</a> · <a href="/dossiers/{{ a.dossier.code }}/grand-livre">Grand livre</a></span>
   </summary>
   {% if x.orphelins %}
   <div class="orphelins">
@@ -61,7 +61,8 @@
         {% elif b.date_prochaine_revision %}{{ b.date_prochaine_revision | date_fr }}{% else %}<span class="discret">—</span>{% endif %}</td>
       <td class="petit">{% if sit.courant %}n° {{ sit.courant.id }} · {{ sit.courant.montant_ht | eur2 }}<div class="discret">{{ 'jusqu’au ' ~ (sit.courant.fin | date_fr) if sit.courant.fin else 'sans terme' }}</div>{% else %}<span class="negatif">aucun en cours</span>{% endif %}
         {% if sit.suivant %}<div><span class="pastille ok">Suivant créé</span> au {{ sit.suivant.debut | date_fr }}</div>{% elif l.r and l.r.publie and not l.r.gel and l.r.jours >= 0 %}<div><a href="/baux/{{ b.id }}/abonnement">Abonnement suivant à créer</a></div>{% endif %}</td>
-      <td>{{ E.pastille(sit.gravite) }}{% for e in sit.ecarts if e.gravite != 'info' %}<div class="discret petit">{{ e.titre }}</div>{% endfor %}</td>
+      <td>{{ E.pastille(sit.gravite) }}{% for e in sit.ecarts if e.gravite != 'info' %}<div class="discret petit">{{ e.titre }}</div>{% endfor %}
+        {% if l.compte and l.compte.solde > 0.005 %}<div class="petit negatif">Compte client : {{ l.compte.solde | eur2 }} dû</div>{% endif %}</td>
       <td class="petit actions-bail"><a href="/baux/{{ b.id }}">Voir</a> · <a href="/baux/{{ b.id }}/modifier">Modifier</a>{% if sit.proposition and not sit.suivant %} · <a href="/baux/{{ b.id }}/abonnement">Abonnement</a>{% endif %}{% if sit.rappel and sit.rappel.echeances and not sit.rappel_facture %} · <a href="/baux/{{ b.id }}/rappel">Rappel</a>{% endif %}</td>
     </tr>
     {% endfor %}

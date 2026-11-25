@@ -28,7 +28,7 @@ from fastapi.templating import Jinja2Templates
 from indexation_loyer import calcul
 from indexation_loyer.baux import DECISIONS, INDICES, METHODES, PERIODICITES_FACTURATION, TYPES_BAIL, est_gel
 
-from . import (__version__, comptes, db, depot, ecriture, editions, import_tableur, jetons, pieces, rapprochement as rp,
+from . import (__version__, comptes, db, depot, ecriture, editions, grand_livre, import_tableur, jetons, pieces, rapprochement as rp,
                referentiel, simulation)
 
 ICI = Path(__file__).resolve().parent
@@ -447,6 +447,7 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
                     "variation": None, "courrier_le": None, "courrier": False,
                     "abonnement_pret": sit.suivant is not None}
 
+        soldes = {(a["dossier"]["code"], x["compte"]): x for a in an for x in grand_livre.comptes(cx, a["dossier"]["code"])}
         mot = q.strip().lower()
         societes = []
         for a in an:
@@ -463,7 +464,8 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
                     continue
                 if indice and (r["publie"] or r["gel"]) != (indice == "publie"):
                     continue
-                lignes.append({"sit": sit, "etats": etats.get(b["id"], set()), "r": r, "n": rp.ECHEANCES_PAR_AN.get(b.get("periodicite"), 12)})
+                lignes.append({"sit": sit, "etats": etats.get(b["id"], set()), "r": r, "n": rp.ECHEANCES_PAR_AN.get(b.get("periodicite"), 12),
+                               "compte": soldes.get((dsr["code"], b.get("compte_client")))})
             if debut or fin:
                 lignes.sort(key=lambda x: x["r"]["date"])
             orphelins = [e for e in a["ecarts"] if e.type == "ORPHELIN"]
@@ -740,6 +742,8 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         return gabarits.TemplateResponse(request, "bail.html", contexte(
             request, page="bord", a=a, sit=s, corps=corps, lignes=lignes, dec=dec, DECISIONS=DECISIONS,
             alerte_indice=alerte_indice, message=message, erreur=erreur, mention=rp.mention_speciale(s.bail, jour()),
+            compte=next((x for x in grand_livre.comptes(cx, b["dossier"]) if x["compte"] == b.get("compte_client")), None),
+            gl=grand_livre.import_du_dossier(cx, b["dossier"]),
             pieces=pieces.du_bail(cx, bail_id), NATURES=referentiel.NATURES_PIECE,
             historique=[dict(r) for r in cx.execute(
                 "SELECT * FROM historique WHERE bail_id=? ORDER BY id DESC LIMIT 15", (bail_id,))],
@@ -882,6 +886,83 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         cx.commit()
         return Response(contenu, media_type="application/pdf", headers={
             "Content-Disposition": f'inline; filename="{code}_revisions_{annee}.pdf"'})
+
+    # ------------------------------------------------------------ grand livre : comptes clients
+    def page_grand_livre(request: Request, code: str, erreur: str = "", message: str = "", statut: int = 200):
+        d = dossier_ou_404(code)
+        baux = [dict(r) for r in cx.execute("SELECT id, code, locataire, local, compte_client FROM baux WHERE dossier=? ORDER BY code", (code,))]
+        rattache = {b["compte_client"]: b["id"] for b in baux if b["compte_client"]}
+        cpt = grand_livre.comptes(cx, code)
+        for x in cpt:
+            x["bail_id"] = rattache.get(x["compte"])
+            x["suggestion"] = None if x["bail_id"] else grand_livre.suggerer(x, [b for b in baux if not b["compte_client"]])
+        return gabarits.TemplateResponse(request, "grand_livre.html", contexte(
+            request, page="baux", d=d, imp=grand_livre.import_du_dossier(cx, code), comptes=cpt, baux=baux,
+            erreur=erreur, message=message), status_code=statut)
+
+    @app.get("/dossiers/{code}/grand-livre", response_class=HTMLResponse)
+    def grand_livre_voir(request: Request, code: str):
+        return page_grand_livre(request, code)
+
+    @app.post("/dossiers/{code}/grand-livre", response_class=HTMLResponse)
+    async def grand_livre_deposer(request: Request, code: str):
+        dossier_ou_404(code)
+        fichier = (await request.form()).get("fichier")
+        if fichier is None or isinstance(fichier, str) or not fichier.filename:
+            return page_grand_livre(request, code, "Aucun fichier choisi.", statut=400)
+        contenu = await fichier.read(grand_livre.TAILLE_MAX + 1)
+        try:
+            lu = grand_livre.lire(fichier.filename, contenu)
+        except grand_livre.GrandLivreRefuse as exc:
+            return page_grand_livre(request, code, str(exc), statut=400)
+        grand_livre.enregistrer(cx, code, Path(fichier.filename).name, lu)
+        return page_grand_livre(request, code, message=f"Grand livre déposé : {lu['comptes']} compte(s) client, {len(lu['lignes'])} écriture(s) "
+                                                        f"sur {lu['total_lignes']} ; le reste du grand livre n'est pas conservé.")
+
+    @app.post("/dossiers/{code}/grand-livre/rattacher", response_class=HTMLResponse)
+    async def grand_livre_rattacher(request: Request, code: str):
+        dossier_ou_404(code)
+        champs = await formulaire(request)
+        ids = {r["id"] for r in cx.execute("SELECT id FROM baux WHERE dossier=?", (code,))}
+        connus = {x["compte"] for x in grand_livre.comptes(cx, code)}
+        choix = {k[len("compte_"):]: v for k, v in champs.items() if k.startswith("compte_") and k[len("compte_"):] in connus}
+        cibles = [int(v) for v in choix.values() if v.isdigit()]
+        if any(i not in ids for i in cibles) or len(cibles) != len(set(cibles)):
+            return page_grand_livre(request, code, "Rattachement refusé : un bail inconnu, ou rattaché à deux comptes.", statut=400)
+        changes = []
+        for compte, v in choix.items():
+            cx.execute("UPDATE baux SET compte_client='' WHERE dossier=? AND compte_client=?", (code, compte))
+            if v.isdigit():
+                cx.execute("UPDATE baux SET compte_client=? WHERE id=?", (compte, int(v)))
+                changes.append(f"{compte} → bail n° {v}")
+        referentiel.tracer(cx, "Comptes clients rattachés", " ; ".join(changes) or "aucun rattachement", code)
+        cx.commit()
+        return page_grand_livre(request, code, message=f"{len(changes)} compte(s) client rattaché(s).")
+
+    @app.get("/baux/{bail_id}/compte.pdf")
+    def compte_pdf(bail_id: int, courrier: int = 0):
+        """Extrait du compte client du locataire, tel qu'au dernier grand livre déposé, seul ou avec le courrier de régularisation."""
+        b = ligne_bail(bail_id)
+        if not b.get("compte_client"):
+            raise HTTPException(404, "Aucun compte client rattaché à ce bail.")
+        lignes = grand_livre.lignes_du_compte(cx, b["dossier"], b["compte_client"])
+        if not lignes:
+            raise HTTPException(404, "Ce compte ne figure pas dans le dernier grand livre déposé.")
+        a = analyses(b["dossier"])[0]
+        sit = next(x for x in a["situations"] if x.bail["id"] == bail_id)
+        n = rp.ECHEANCES_PAR_AN.get(sit.bail.get("periodicite"), 12)
+        ht = round(sit.attendu_annuel / n, 2)
+        attendu = round(ht + ht * (sit.bail.get("tva_pct") or 0) / 100, 2) if sit.bail.get("calcule") else None
+        imp = grand_livre.import_du_dossier(cx, b["dossier"]) or {}
+        d = dossier_ou_404(b["dossier"])
+        contenu = editions.releve_compte(d, sit.bail, {"compte": b["compte_client"], "libelle": lignes[0]["libelle"]}, lignes,
+                                         rp._d(imp.get("du")), rp._d(imp.get("au")), jour(), courrier=bool(courrier), attendu_ttc=attendu,
+                                         unite=rp.UNITE.get(sit.bail.get("periodicite"), "échéance"), fictif=d["source_referentiel"] == FICTIF)
+        referentiel.tracer(cx, "Courrier de régularisation édité (grand livre)" if courrier else "Extrait du compte client édité",
+                           f"compte {b['compte_client']}, solde {sum(l['debit'] - l['credit'] for l in lignes):.2f} €", b["dossier"], bail_id)
+        cx.commit()
+        return Response(contenu, media_type="application/pdf", headers={
+            "Content-Disposition": f'inline; filename="{b["dossier"]}_{b["code"]}_compte_{"regularisation" if courrier else "extrait"}_{jour():%Y-%m-%d}.pdf"'})
 
     @app.get("/baux/{bail_id}/releve.pdf")
     def releve_pdf(bail_id: int, courrier: int = 0, depuis: str = ""):
