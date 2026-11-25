@@ -37,7 +37,7 @@ LIBELLES = {
     "date_sortie": "Sortie du locataire", "loyer_initial_annuel": "Loyer initial annuel HT",
     "charges_annuelles": "Provision sur charges annuelle HT", "tva_pct": "TVA", "periodicite": "Facturation",
     "indice": "Indice", "trimestre_base": "Trimestre de l'indice de départ", "periodicite_revision_ans": "Révision tous les",
-    "methode": "Méthode", "plafond_annuel_pct": "Plafond annuel", "customer_id": "Client Pennylane",
+    "methode": "Méthode", "plafond_annuel_pct": "Plafond par révision", "customer_id": "Client Pennylane",
     "subscription_id": "Abonnement Pennylane", "notes": "Notes",
     "reprise_date": "Reprise : date de la dernière révision", "reprise_loyer_annuel": "Reprise : loyer annuel HT à cette date",
     "reprise_trimestre": "Reprise : trimestre de l'indice appliqué",
@@ -179,7 +179,7 @@ def suivi_revisions(ligne: dict, indices: dict, lignes: list[calcul.LigneRevisio
         elif l.loyer_brut is not None and l.loyer_retenu < l.loyer_brut:
             plafond = f"{ligne.get('plafond_annuel_pct'):g}".replace(".", ",")
             texte = (f"Révision au {quand} : variation de l'indice de {variation} ({rapport}), limitée par le plafond "
-                     f"du bail de {plafond} % par an, soit {par(l.loyer_retenu)}.")
+                     f"du bail de {plafond} % du loyer antérieur, soit {par(l.loyer_retenu)}.")
         else:
             texte = f"Révision au {quand} : {rapport}, soit {variation} ; loyer porté à {par(l.loyer_retenu)}."
         revisions.append({"date": l.echeance.date_revision.isoformat(), "texte": texte,

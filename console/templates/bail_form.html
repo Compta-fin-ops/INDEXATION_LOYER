@@ -40,7 +40,7 @@
     <label>Trimestre de l'indice de départ<input name="trimestre_base" value="{{ b.trimestre_base or '' }}" placeholder="2023-T2"><span class="aide">Celui que cite le bail. Vide : deux trimestres avant la prise d'effet, à confirmer dans le bail.</span></label>
     <label>Révision tous les<select name="periodicite_revision_ans">{% for v in (1, 2, 3) %}<option value="{{ v }}"{{ ' selected' if (b.periodicite_revision_ans or 1) | int == v }}>{{ v }} an{{ 's' if v > 1 }}</option>{% endfor %}</select></label>
     <label>Méthode<select name="methode">{{ options('methode', choix.methode) }}</select><span class="aide">Chaînée : indice contre indice de la révision précédente. Base fixe : toujours contre l'indice de départ.</span></label>
-    <label>Plafond annuel, en %<input name="plafond_annuel_pct" value="{{ nb(b.plafond_annuel_pct) }}" inputmode="decimal"><span class="aide">Vide : aucun plafond.</span></label>
+    <label>Plafond par révision, en %<input name="plafond_annuel_pct" value="{{ nb(b.plafond_annuel_pct) }}" inputmode="decimal"><span class="aide">Hausse maximale à chaque révision, en % du loyer antérieur, quelle que soit la périodicité. Vide : aucun plafond.</span></label>
   </div>
 </div>
 <div class="carte">

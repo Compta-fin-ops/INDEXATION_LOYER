@@ -98,7 +98,7 @@ def valeurs_courrier(societe: Societe, bail: Bail, l: calcul.LigneRevision) -> d
         "loyer_nouveau_echeance": _eur(nouveau / n if nouveau is not None else None),
         "periodicite": _periodicite_adj(bail.periodicite_facturation), "variation_pct": _pct(l.variation_pct),
         "date_revision": f"{l.echeance.date_revision:%d/%m/%Y}", "date_effet_bail": f"{bail.date_effet:%d/%m/%Y}",
-        "plafond": f"{bail.plafond_annuel_pct:g} % par an".replace(".", ",") if bail.plafond_annuel_pct is not None else "",
+        "plafond": f"{bail.plafond_annuel_pct:g} % du loyer antérieur à chaque révision".replace(".", ",") if bail.plafond_annuel_pct is not None else "",
         "bailleur": societe.nom, "signataire": societe.signataire or societe.nom, "qualite": societe.qualite_signataire,
     }
 

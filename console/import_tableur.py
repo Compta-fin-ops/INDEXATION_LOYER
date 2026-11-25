@@ -48,7 +48,7 @@ COLONNES = (
     ("Trimestre de départ", "trimestre_base", False, "Celui que cite le bail, sous la forme 2023-T2. Vide : deux trimestres avant la prise d'effet, à confirmer."),
     ("Révision tous les (ans)", "periodicite_revision_ans", False, "1, 2 ou 3. 1 par défaut."),
     ("Méthode", "methode", False, " / ".join(METHODES) + ". Chaînée par défaut."),
-    ("Plafond annuel (%)", "plafond_annuel_pct", False, "Vide : aucun plafond."),
+    ("Plafond par révision (%)", "plafond_annuel_pct", False, "Hausse maximale à chaque révision, en % du loyer antérieur. Vide : aucun plafond."),
     ("Reprise : date de la dernière révision", "reprise_date", False, "Bail repris en cours : date de la dernière révision réellement appliquée. Les trois colonnes « Reprise » vont ensemble."),
     ("Reprise : loyer annuel HT à cette date", "reprise_loyer_annuel", False, "Loyer réellement en vigueur à cette date, hors charges. La console ne recalcule rien avant."),
     ("Reprise : trimestre de l'indice appliqué", "reprise_trimestre", False, "Sous la forme 2024-T2 : celui appliqué à cette révision. La suivante prendra le même trimestre, une période plus tard."),
@@ -78,6 +78,7 @@ def _cle(titre) -> str:
 
 
 _PAR_CLE = {_cle(titre): champ for titre, champ, _, _ in COLONNES}
+_PAR_CLE[_cle("Plafond annuel (%)")] = "plafond_annuel_pct"          # titre des modèles antérieurs à la v0.15
 
 
 def _texte(v) -> str:

@@ -38,7 +38,7 @@
 </div>
 <div class="carte">
   <h2>Éditions</h2>
-  <p style="margin: 0 0 8px"><a class="fort" href="/dossiers/{{ a.dossier.code }}/situation-loyers.pdf">Situation des loyers à ce jour</a>, pour le bailleur : loyers en cours, nouveaux loyers connus avec la décision à prendre, révisions en attente d'indice.</p>
+  <p style="margin: 0 0 8px"><a class="fort" href="/dossiers/{{ a.dossier.code }}/situation-loyers.pdf">Situation des loyers à ce jour</a>, pour le gérant : loyers réindexés sur douze mois avec l'ancien et le nouveau loyer, réindexations à venir avec ou sans indice publié, chacune datée.</p>
   <p style="margin: 0">État annuel des révisions de loyer :
     {% for an in (aujourdhui.year, aujourdhui.year - 1) %}<a class="fort" href="/dossiers/{{ a.dossier.code }}/etat-revisions.pdf?annee={{ an }}">{{ an }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
     · <a href="/courriers?dossier={{ a.dossier.code }}">courriers de réindexation à éditer</a></p>

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from console import db, depot, pennylane_api, pieces, rapprochement as rp, referentiel, simulation
 from console.app import creer_app
 from tests.outils import client_connecte
-from indexation_loyer import insee
+from indexation_loyer import calcul, insee
 
 AUJ = date(2026, 11, 22)
 ILC = {"2022-T4": 126.05, "2023-T4": 132.63, "2024-T4": 135.30, "2025-T4": 137.29}     # valeurs de test, arbitraires
@@ -147,7 +147,7 @@ def test_modification_tracee_et_revisions_apres_le_terme(console, indices):
     # plafond de 1,5 % atteint en 2024 et 2025 (24 360,00 puis 24 725,40) ; en 2026 l'indice donne +1,47 %, sous le plafond
     assert b["loyer_attendu_annuel"] == pytest.approx(25089.06, abs=0.01)
     h = cx.execute("SELECT detail FROM historique WHERE action='Bail modifié'").fetchone()["detail"]
-    assert "Plafond annuel : — → 1,5" in h and "Durée : 9 → 3" in h and "Terme contractuel : 01/04/2032 → 01/04/2026" in h
+    assert "Plafond par révision : — → 1,5" in h and "Durée : 9 → 3" in h and "Terme contractuel : 01/04/2032 → 01/04/2026" in h
     c.post(f"/baux/{bail_id}", data={**BAIL, "date_sortie": "2026-06-30"})
     assert _bail(cx, bail_id, indices)["date_prochaine_revision"] is None    # sortie du locataire : plus de révision
 
@@ -443,39 +443,38 @@ def test_courriers_en_lot_et_etat_annuel(console, indices):
     assert e27[1]["nature"] == "Appliquée" and e27[1]["loyer_fin"] == pytest.approx(13070.06 * 139.00 / 137.29, abs=0.02)
 
 
-def test_situation_des_loyers_pour_le_bailleur(console, indices):
-    """À date : nouveaux loyers connus à décider, révisions en attente d'indice, autres baux."""
+def test_situation_des_loyers_pour_le_gerant(console, indices):
+    """À date : loyers réindexés sur douze mois, réindexations à venir avec indice publié, en attente d'indice, autres baux."""
     from console import editions
     c, cx, bail_id, _ = console
-    c.post("/dossiers/HALLES/baux", data={**BAIL, "code": "B02", "locataire": "Opticien Durand", "loyer_initial_annuel": "12000"})
+    c.post("/dossiers/HALLES/baux", data={**BAIL, "code": "B02", "locataire": "Opticien Durand", "loyer_initial_annuel": "12000",
+                                          "date_effet": "2023-01-15"})
     c.post("/dossiers/HALLES/baux", data={**BAIL, "code": "B03", "locataire": "Parti", "date_sortie": "2026-06-30"})
     r = c.get("/dossiers/HALLES/situation-loyers.pdf")
     assert r.status_code == 200 and r.content.startswith(b"%PDF") and "HALLES_situation_loyers_2026-11-22.pdf" in r.headers["content-disposition"]
-    # l'indice paraît ; le bailleur gèle B01, B02 reste à décider
+    table = calcul.table_indices(referentiel.lire_indices(indices))
+    baux = []
+    for b in depot.charger(cx, "HALLES", AUJ, indices)[0]["baux"]:
+        if not b.get("date_sortie"):
+            baux.append({"bail": b, "revisions": referentiel.reviser(b, table, {}, AUJ)[1]})
+    g = editions.lignes_situation(baux, AUJ)
+    # B01 réindexé le 01/04/2026 ; B02 attend l'ILC 2026-T3 pour le 15/01/2027 ; aucun indice 2026-T4 pour B01 en 2027
+    assert [(l["bail"]["code"], l["date"]) for l in g["revises"]] == [("B02", date(2026, 1, 15)), ("B01", date(2026, 4, 1))]
+    revises = {l["bail"]["code"]: l for l in g["revises"]}
+    assert revises["B01"]["date"] == date(2026, 4, 1)
+    assert revises["B01"]["avant"] == pytest.approx(25761.21, abs=0.01) and revises["B01"]["apres"] == pytest.approx(26140.11, abs=0.01)
+    assert all(not l["retard"] for l in g["attente"]) and {l["bail"]["code"] for l in g["attente"]} == {"B01", "B02"}
+    assert all(l["date"] > AUJ for l in g["attente"]) and g["connus"] == [] and g["autres"] == []
+    # l'indice paraît : la réindexation de B01 passe dans les « à venir, indice publié », avec son nouveau loyer
     insee.ecrire_cache([insee.Observation("ILC", "001532540", t, v, "A", "2026-12-20", "TEST", "2026-12-21")
                         for t, v in {**ILC, "2026-T4": 139.00}.items()], indices)
-    c.post(f"/baux/{bail_id}/revisions/4", data={"decision": "Geler – sans rattrapage", "commentaire": "accord du bailleur"})
-    lignes = [
-        {"date": date(2027, 4, 1), "etat": "a_faire", "gel": True, "decision_saisie": True, "commentaire": "accord du bailleur", "courrier_le": None,
-         "bail": {"code": "B01", "locataire": "Boulangerie Martin", "local": "x"}, "indice": "ILC 2026-T4", "valeur": 139.0, "precedent": "2025-T4",
-         "valeur_precedente": 137.29, "avant": 26140.11, "apres": 26140.11, "variation": 0.0},
-        {"date": date(2027, 4, 1), "etat": "a_faire", "gel": False, "decision_saisie": False, "commentaire": "", "courrier_le": None,
-         "bail": {"code": "B02", "locataire": "Opticien Durand", "local": "x"}, "indice": "ILC 2026-T4", "valeur": 139.0, "precedent": "2025-T4",
-         "valeur_precedente": 137.29, "avant": 13070.06, "apres": 13232.85, "variation": 0.01246},
-        {"date": date(2026, 10, 1), "etat": "retard", "gel": False, "decision_saisie": False, "commentaire": "", "courrier_le": None,
-         "bail": {"code": "B04", "locataire": "En retard", "local": "x"}, "indice": "ILAT 2026-T2", "valeur": None, "precedent": "2025-T2",
-         "valeur_precedente": 137.0, "avant": 9000.0, "apres": None, "variation": None},
-        {"date": date(2027, 1, 1), "etat": "faite", "gel": False, "decision_saisie": True, "commentaire": "", "courrier_le": "2026-11-20",
-         "bail": {"code": "B05", "locataire": "Prêt", "local": "x"}, "indice": "ILC 2026-T3", "valeur": 138.0, "precedent": "2025-T3",
-         "valeur_precedente": 137.0, "avant": 5000.0, "apres": 5036.5, "variation": 0.0073},
-    ]
-    g = editions.repartir(lignes)
-    assert [l["bail"]["code"] for l in g["connus"]] == ["B01", "B02"] and [l["bail"]["code"] for l in g["attente"]] == ["B04"]
-    assert [l["bail"]["code"] for l in g["traites"]] == ["B05"]
-    pdf = editions.situation_loyers({"nom": "SCI des Halles", "siren": "123456789"}, lignes,
-                                    [{"code": "B09", "locataire": "Sans révision", "local": "x", "loyer_attendu_annuel": 7000.0}], AUJ)
+    table = calcul.table_indices(referentiel.lire_indices(indices))
+    g = editions.lignes_situation([{**x, "revisions": referentiel.reviser(x["bail"], table, {}, AUJ)[1]} for x in baux], AUJ)
+    b01 = next(l for l in g["connus"] if l["bail"]["code"] == "B01")
+    assert b01["date"] == date(2027, 4, 1) and b01["apres"] == pytest.approx(26140.11 * 139.00 / 137.29, abs=0.02)
+    pdf = editions.situation_loyers({"nom": "SCI des Halles", "siren": "123456789"},
+                                    {**g, "autres": [{"bail": {"code": "B09", "locataire": "Sans révision", "local": "x"},
+                                                      "loyer": 7000.0, "prochaine": None}]}, AUJ)
     assert pdf.startswith(b"%PDF") and len(pdf) > 2500
-    # la page réelle reflète la même situation : B01 gelé et B02 à décider, B03 sorti n'y figure pas
-    r = c.get("/dossiers/HALLES/situation-loyers.pdf")
-    assert r.status_code == 200 and c.get("/dossiers/INCONNU/situation-loyers.pdf").status_code == 404
+    assert c.get("/dossiers/INCONNU/situation-loyers.pdf").status_code == 404
     assert "Situation des loyers à ce jour" in c.get("/dossiers/HALLES").text

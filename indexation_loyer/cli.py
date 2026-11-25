@@ -46,7 +46,7 @@ def _lire_baux_csv(chemin: Path) -> list[Bail]:
         "Date de prise d'effet": "date_effet", "Durée (ans)": "duree_ans", "Loyer initial annuel HT": "loyer_initial_annuel_ht",
         "Charges annuelles HT": "charges_annuelles_ht", "TVA (%)": "tva_pct", "Périodicité de facturation": "periodicite_facturation",
         "Indice": "indice", "Trimestre indice de base": "trimestre_base", "Périodicité de révision (ans)": "periodicite_revision_ans",
-        "Méthode": "methode", "Plafond annuel (%) – optionnel": "plafond_annuel_pct", "Pennylane customer_id": "pennylane_customer_id",
+        "Méthode": "methode", "Plafond par révision (%) – optionnel": "plafond_annuel_pct", "Plafond annuel (%) – optionnel": "plafond_annuel_pct", "Pennylane customer_id": "pennylane_customer_id",
         "Pennylane product_id": "pennylane_product_id", "Pennylane subscription_id": "pennylane_subscription_id", "Notes": "notes",
     }
     baux = []

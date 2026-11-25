@@ -91,7 +91,7 @@ Statuts de la feuille Révisions :
 - **Trimestre de base** : par défaut T-2 par rapport à la prise d'effet (« dernier indice publié »). À relever sur l'acte.
 - **Trimestre de référence** : même trimestre que la base, décalé de la périodicité (clause « indice du même trimestre »).
 - **Chaînée** : loyer N = loyer N-1 × I(N) / I(N-1). **Base fixe** : loyer N = loyer initial × I(N) / I(base).
-- **Plafond annuel (%)** : optionnel, borne le loyer retenu à base × (1 + p)^années couvertes. Sert au plafonnement ILC 3,5 % des PME (loi n° 2022-1158 du 16 août 2022, art. 14, et sa prolongation : période et champ d'application à vérifier bail par bail) ou à un plafond contractuel.
+- **Plafond par révision (%)** : optionnel, borne le loyer retenu à loyer antérieur × (1 + p), à chaque révision quelle que soit sa périodicité. Sert au plafonnement ILC 3,5 % des PME (loi n° 2022-1158 du 16 août 2022, art. 14, et sa prolongation : période et champ d'application à vérifier bail par bail) ou à un plafond contractuel.
 - Arrondi au centime sur le loyer annuel ; la baisse est appliquée si l'indice recule.
 
 ### Geler une révision : deux sémantiques
@@ -99,7 +99,7 @@ Statuts de la feuille Révisions :
 | Décision | Loyer de l'échéance gelée | Révision suivante (méthode chaînée) | Usage |
 |---|---|---|---|
 | Geler – sans rattrapage | inchangé | repart de l'indice de référence de l'échéance gelée : la variation de l'année est **abandonnée** | geste commercial définitif |
-| Geler – rattrapage possible | inchangé | repart de l'indice de la **dernière révision appliquée** : le coefficient couvre deux périodes, le plafond annuel éventuel aussi | report négocié, avenant |
+| Geler – rattrapage possible | inchangé | repart de l'indice de la **dernière révision appliquée** : le coefficient couvre deux périodes, le plafond éventuel ne s'applique qu'une fois | report négocié, avenant |
 
 En méthode « Base fixe » le rattrapage est mécanique (loyer initial × indice N / indice de base), les deux
 gels produisent le même résultat. Le renoncement du bailleur à une indexation acquise est un acte de

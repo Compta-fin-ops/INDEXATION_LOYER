@@ -208,7 +208,7 @@ def test_reprise_d_un_classeur_d_indexation(tmp_path):
     assert b01["calcule"] == 1 and b01["trimestre_base"] and b01["customer_id"] == 100001
     assert b01["loyer_attendu_annuel"] == pytest.approx(24978.23, abs=0.01)      # gel 2025 sans rattrapage
     assert (b01["date_derniere_revision"], b01["date_prochaine_revision"]) == ("2026-04-01", "2027-04-01")
-    assert b03["loyer_attendu_annuel"] == pytest.approx(65594.40, abs=0.01)      # rattrapage plafonné
+    assert b03["loyer_attendu_annuel"] == pytest.approx(65574.12, abs=0.01)      # rattrapage plafonné une seule fois
     # le recalcul de la console retrouve, bail par bail, ce que le classeur avait calculé
     for code, b in baux.items():
         assert b["loyer_attendu_annuel"] == pytest.approx(stocke[code]["loyer_attendu_annuel"], abs=0.005), code

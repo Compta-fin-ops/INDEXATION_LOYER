@@ -1,8 +1,8 @@
-"""Éditions de la console : état annuel des révisions d'une société, en PDF."""
+"""Éditions de la console : état annuel des révisions d'une société, situation des loyers remise au gérant, en PDF."""
 from __future__ import annotations
 
 import io
-from datetime import date
+from datetime import date, timedelta
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
@@ -123,25 +123,48 @@ def etat_annuel(societe: dict, baux: list[dict], annee: int, aujourdhui: date, f
 # ---------------------------------------------------------------------------
 # Situation des loyers à date, pour décision du bailleur
 # ---------------------------------------------------------------------------
-def repartir(lignes: list[dict]) -> dict[str, list[dict]]:
-    """Trois groupes : nouveaux loyers connus, révisions en attente d'indice, révisions déjà traitées."""
-    groupes: dict[str, list[dict]] = {"connus": [], "attente": [], "traites": []}
-    for l in sorted(lignes, key=lambda x: x["date"]):
-        if l["etat"] in ("retard", "attente"):
-            groupes["attente"].append(l)
-        elif l["etat"] == "faite":
-            groupes["traites"].append(l)
-        else:
-            groupes["connus"].append(l)
+HORIZON_SITUATION_JOURS = 365      # révisions passées et à venir retenues dans la situation remise au gérant
+
+
+def lignes_situation(baux: list[dict], aujourdhui: date, horizon_jours: int = HORIZON_SITUATION_JOURS) -> dict[str, list[dict]]:
+    """Quatre groupes pour la situation remise au gérant, chacun daté par la date de réindexation :
+    « revises » (révisions des douze derniers mois, ancien et nouveau loyer), « connus » (à venir, indice publié),
+    « attente » (indice pas encore publié, échéance passée ou à venir), « autres » (aucune révision dans la fenêtre).
+
+    `baux` : [{bail (ligne avec ses champs calculés), revisions (LigneRevision, vide si le bail n'est pas calculé)}]."""
+    debut, fin = aujourdhui - timedelta(days=horizon_jours), aujourdhui + timedelta(days=horizon_jours)
+    groupes: dict[str, list[dict]] = {"revises": [], "connus": [], "attente": [], "autres": []}
+
+    def ligne(b: dict, l) -> dict:
+        return {"bail": b, "date": l.echeance.date_revision, "indice": b.get("indice") or "", "trimestre": l.echeance.trimestre_reference,
+                "valeur": l.indice_reference, "precedent": l.trimestre_precedent_effectif, "valeur_precedente": l.indice_precedent,
+                "avant": l.loyer_precedent, "apres": l.loyer_retenu, "gel": est_gel(l.decision),
+                "plafonne": l.loyer_brut is not None and l.loyer_retenu is not None and l.loyer_retenu < l.loyer_brut and not est_gel(l.decision),
+                "retard": l.echeance.date_revision <= aujourdhui}
+
+    for x in baux:
+        b, revs = x["bail"], x["revisions"]
+        avant = len(groupes["revises"]) + len(groupes["connus"]) + len(groupes["attente"])
+        passees = [l for l in revs if debut < l.echeance.date_revision <= aujourdhui]
+        faites = [l for l in passees if l.loyer_retenu is not None]
+        if faites:
+            groupes["revises"].append(ligne(b, faites[-1]))
+        for l in passees:                                # révision échue dont l'indice n'est pas encore publié
+            if l.loyer_retenu is None and not est_gel(l.decision):
+                groupes["attente"].append(ligne(b, l))
+        prochaine = next((l for l in revs if aujourdhui < l.echeance.date_revision <= fin), None)
+        if prochaine is not None:
+            groupes["connus" if prochaine.loyer_retenu is not None else "attente"].append(ligne(b, prochaine))
+        if len(groupes["revises"]) + len(groupes["connus"]) + len(groupes["attente"]) == avant:
+            groupes["autres"].append({"bail": b, "loyer": b.get("loyer_attendu_annuel"),
+                                      "prochaine": b.get("date_prochaine_revision")})
+    for g in ("revises", "connus", "attente"):
+        groupes[g].sort(key=lambda l: (l["date"], l["bail"].get("code") or ""))
     return groupes
 
 
-def situation_loyers(societe: dict, lignes: list[dict], autres: list[dict], aujourdhui: date, fictif: bool = False) -> bytes:
-    """PDF paysage remis au bailleur : où en est chaque loyer, et ce qu'il lui revient de décider.
-
-    `lignes` : révisions suivies (une par bail, plus une révision échue sans indice le cas échéant) ;
-    `autres` : baux sans révision à venir connue."""
-    g = repartir(lignes)
+def situation_loyers(societe: dict, groupes: dict[str, list[dict]], aujourdhui: date, fictif: bool = False) -> bytes:
+    """PDF paysage remis au gérant, pour information : loyers révisés, révisions à venir avec ou sans indice publié."""
     ss = getSampleStyleSheet()
     base = ParagraphStyle("b", parent=ss["Normal"], fontName="Helvetica", fontSize=8, leading=10)
     petit = ParagraphStyle("p", parent=base, fontSize=7, leading=9, textColor=colors.grey)
@@ -149,17 +172,6 @@ def situation_loyers(societe: dict, lignes: list[dict], autres: list[dict], aujo
     gras_droite = ParagraphStyle("gd", parent=droite, fontName="Helvetica-Bold")
     titre = ParagraphStyle("t", parent=base, fontName="Helvetica-Bold", fontSize=14, leading=18)
     section = ParagraphStyle("s", parent=base, fontName="Helvetica-Bold", fontSize=10, leading=13, spaceBefore=8, spaceAfter=3)
-
-    def cases() -> Table:
-        """Deux cases vides à cocher, dessinées : aucune police standard ne porte le carré vide."""
-        t = Table([["", Paragraph("Appliquer", base), "", Paragraph("Geler", base)]], colWidths=[3 * mm, 15 * mm, 3 * mm, 12 * mm],
-                  rowHeights=[3 * mm])
-        t.setStyle(TableStyle([("BOX", (0, 0), (0, 0), 0.6, colors.black), ("BOX", (2, 0), (2, 0), 0.6, colors.black),
-                               ("LEFTPADDING", (0, 0), (-1, -1), 1.5), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                               ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                               ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
-        t.hAlign = "LEFT"
-        return t
 
     largeur = landscape(A4)[0]
     tampon = io.BytesIO()
@@ -173,84 +185,73 @@ def situation_loyers(societe: dict, lignes: list[dict], autres: list[dict], aujo
     bail = lambda b: [Paragraph(f"<b>{b['code']}</b>", base),
                       Paragraph(f"{b.get('locataire') or ''}<br/><font color='grey'>{b.get('local') or ''}</font>", base)]
     pct = lambda v: "—" if v is None else f"{v * 100:+.2f} %".replace(".", ",")
+    tri = lambda t: (t or "").replace("-", " ")
+    indice = lambda l: (f"{l['indice']} {tri(l['trimestre'])} : {_nb(l['valeur'])}<br/>"
+                        f"<font color='grey'>contre {tri(l['precedent'])} : {_nb(l['valeur_precedente'])}</font>")
+
+    def tableau_variations(lignes: list[dict], total: str) -> Table:
+        corps = [en(["Bail", "Locataire et local", "Réindexation au", "Indice", "Ancien loyer", "Nouveau loyer", "Variation",
+                     "Écart annuel", "Observation"])]
+        total_avant = total_apres = 0.0
+        for l in lignes:
+            variation = l["apres"] / l["avant"] - 1 if l["apres"] is not None and l["avant"] else None
+            observation = "Gel décidé : loyer maintenu" if l["gel"] else "Hausse plafonnée par le bail" if l["plafonne"] else (
+                "Baisse de l'indice" if variation is not None and variation < 0 else "")
+            corps.append([*bail(l["bail"]), Paragraph(f"<b>{l['date']:%d/%m/%Y}</b>", base), Paragraph(indice(l), base),
+                          Paragraph(_eur(l["avant"]), droite), Paragraph(_eur(l["apres"]), gras_droite), Paragraph(pct(variation), droite),
+                          Paragraph(_eur(l["apres"] - l["avant"]) if l["apres"] is not None and l["avant"] is not None else "—", droite),
+                          Paragraph(observation, petit)])
+            total_avant += l["avant"] or 0
+            total_apres += l["apres"] or 0
+        corps.append([Paragraph("<b>Total</b>", base), "", "", "", Paragraph(_eur(total_avant), gras_droite),
+                      Paragraph(_eur(total_apres), gras_droite), Paragraph(pct(total_apres / total_avant - 1) if total_avant else "—", droite),
+                      Paragraph(_eur(total_apres - total_avant), gras_droite), Paragraph(total, petit)])
+        t = Table(corps, colWidths=[13 * mm, 62 * mm, 22 * mm, 42 * mm, 26 * mm, 26 * mm, 17 * mm, 24 * mm, 37 * mm], repeatRows=1)
+        t.setStyle(style)
+        t.setStyle(TableStyle([("LINEABOVE", (0, -1), (-1, -1), 0.8, colors.black)]))
+        return t
+
     el = []
     if fictif:
         el.append(Paragraph("DOCUMENT DE DÉMONSTRATION – VALEURS FICTIVES",
                             ParagraphStyle("f", parent=base, textColor=colors.red, fontName="Helvetica-Bold", alignment=1)))
     el += [Paragraph(f"Situation des loyers au {aujourdhui:%d/%m/%Y}", titre),
            Paragraph(f"<b>{societe['nom']}</b>" + (f" · SIREN {societe['siren']}" if societe.get("siren") else "")
-                     + " · loyers annuels hors taxes et hors charges", base)]
+                     + " · loyers annuels hors taxes et hors charges · document d'information", base)]
 
-    # 1. nouveaux loyers connus : la décision appartient au bailleur
-    el.append(Paragraph(f"1. Nouveaux loyers connus : {len(g['connus'])} révision(s) à décider ou à notifier", section))
-    if g["connus"]:
-        corps = [en(["Bail", "Locataire et local", "Révision au", "Indice", "Loyer en cours", "Nouveau loyer", "Variation",
-                     "Écart annuel", "Décision du bailleur"])]
-        total_avant = total_apres = 0.0
-        for l in g["connus"]:
-            if l["gel"]:
-                decision = "<b>Gel décidé</b>" + (f"<br/><font color='grey'>{l['commentaire']}</font>" if l["commentaire"] else "")
-            elif l["decision_saisie"]:
-                decision = "<b>Application décidée</b>"
-            else:
-                decision = None                          # à décider : deux cases à cocher
-            if decision is not None and l["courrier_le"]:
-                decision += f"<br/><font color='grey'>courrier du {date.fromisoformat(l['courrier_le']):%d/%m/%Y}</font>"
-            variation = l["variation"] if l["variation"] is not None else (
-                l["apres"] / l["avant"] - 1 if l["apres"] is not None and l["avant"] else None)
-            indice = l["indice"] + (f" : {_nb(l['valeur'])}<br/><font color='grey'>contre {l['precedent']} : {_nb(l['valeur_precedente'])}</font>"
-                                   if l.get("valeur") is not None else "")
-            ecart = None if l["apres"] is None or l["avant"] is None else l["apres"] - l["avant"]
-            corps.append([*bail(l["bail"]), Paragraph(f"{l['date']:%d/%m/%Y}", base), Paragraph(indice, base),
-                          Paragraph(_eur(l["avant"]), droite), Paragraph(_eur(l["apres"]), gras_droite), Paragraph(pct(variation), droite),
-                          Paragraph(_eur(ecart) if ecart is not None else "—", droite),
-                          Paragraph(decision, base) if decision is not None else cases()])
-            total_avant += l["avant"] or 0
-            total_apres += (l["apres"] if l["apres"] is not None else l["avant"]) or 0
-        corps.append([Paragraph("<b>Total</b>", base), "", "", "", Paragraph(_eur(total_avant), gras_droite),
-                      Paragraph(_eur(total_apres), gras_droite), Paragraph(pct(total_apres / total_avant - 1) if total_avant else "—", droite),
-                      Paragraph(_eur(total_apres - total_avant), gras_droite), Paragraph("si toutes les révisions sont appliquées", petit)])
-        t = Table(corps, colWidths=[13 * mm, 62 * mm, 20 * mm, 40 * mm, 26 * mm, 26 * mm, 17 * mm, 24 * mm, 41 * mm], repeatRows=1)
-        t.setStyle(style)
-        t.setStyle(TableStyle([("LINEABOVE", (0, -1), (-1, -1), 0.8, colors.black)]))
-        el.append(t)
-    else:
-        el.append(Paragraph("Aucune révision à décider à ce jour.", base))
+    el.append(Paragraph(f"1. Loyers réindexés au cours des douze derniers mois : {len(groupes['revises'])}", section))
+    el.append(tableau_variations(groupes["revises"], "loyers en vigueur") if groupes["revises"] else Paragraph("Aucun.", base))
 
-    # 2. en attente de l'indice
-    el.append(Paragraph(f"2. Révisions en attente de la publication de l'indice : {len(g['attente'])}", section))
-    if g["attente"]:
-        corps = [en(["Bail", "Locataire et local", "Révision au", "Indice attendu", "Loyer en cours", "Situation"])]
-        for l in g["attente"]:
+    el.append(Paragraph(f"2. Réindexations à venir, indice publié : {len(groupes['connus'])}", section))
+    el.append(tableau_variations(groupes["connus"], "après ces réindexations") if groupes["connus"] else Paragraph("Aucune.", base))
+
+    el.append(Paragraph(f"3. Réindexations dont l'indice n'est pas encore publié : {len(groupes['attente'])}", section))
+    if groupes["attente"]:
+        corps = [en(["Bail", "Locataire et local", "Réindexation au", "Indice attendu", "Loyer en cours", "Situation"])]
+        for l in groupes["attente"]:
             situation = ("<b>Date dépassée.</b> Le loyer en cours reste facturé à titre provisoire ; un rappel sera dû à la publication."
-                         if l["etat"] == "retard" else "Nouveau loyer calculé dès la publication de l'indice.")
-            corps.append([*bail(l["bail"]), Paragraph(f"{l['date']:%d/%m/%Y}", base), Paragraph(l["indice"], base),
-                          Paragraph(_eur(l["avant"]), droite), Paragraph(situation, base)])
-        t = Table(corps, colWidths=[13 * mm, 70 * mm, 22 * mm, 34 * mm, 28 * mm, 102 * mm], repeatRows=1)
+                         if l["retard"] else "Nouveau loyer calculé dès la publication de l'indice.")
+            corps.append([*bail(l["bail"]), Paragraph(f"<b>{l['date']:%d/%m/%Y}</b>", base),
+                          Paragraph(f"{l['indice']} {tri(l['trimestre'])}", base), Paragraph(_eur(l["avant"]), droite), Paragraph(situation, base)])
+        t = Table(corps, colWidths=[13 * mm, 70 * mm, 24 * mm, 32 * mm, 28 * mm, 102 * mm], repeatRows=1)
         t.setStyle(style)
         el.append(t)
     else:
         el.append(Paragraph("Aucune.", base))
 
-    # 3. le reste : révisions déjà traitées, baux sans révision à venir
-    reste = [(l["bail"], f"Révision du {l['date']:%d/%m/%Y} prête : " + ("gel notifié" if l["gel"] else f"nouveau loyer {_eur(l['apres'])}")
-              + (f", courrier du {date.fromisoformat(l['courrier_le']):%d/%m/%Y}" if l["courrier_le"] else ""), l["avant"]) for l in g["traites"]]
-    reste += [(b, "Aucune révision à venir connue", b.get("loyer_attendu_annuel")) for b in autres]
-    if reste:
-        el.append(Paragraph(f"3. Autres baux : {len(reste)}", section))
-        corps = [en(["Bail", "Locataire et local", "Loyer en cours", "Situation"])]
-        for b, texte, loyer in reste:
-            corps.append([*bail(b), Paragraph(_eur(loyer), droite), Paragraph(texte, base)])
-        t = Table(corps, colWidths=[13 * mm, 80 * mm, 30 * mm, 146 * mm], repeatRows=1)
+    if groupes["autres"]:
+        el.append(Paragraph(f"4. Autres baux : {len(groupes['autres'])}", section))
+        corps = [en(["Bail", "Locataire et local", "Loyer en cours", "Prochaine réindexation"])]
+        for x in groupes["autres"]:
+            prochaine = date.fromisoformat(str(x["prochaine"])[:10]).strftime("%d/%m/%Y") if x["prochaine"] else "non déterminée"
+            corps.append([*bail(x["bail"]), Paragraph(_eur(x["loyer"]), droite), Paragraph(prochaine, base)])
+        t = Table(corps, colWidths=[13 * mm, 100 * mm, 30 * mm, 126 * mm], repeatRows=1)
         t.setStyle(style)
         el.append(t)
 
     el += [Spacer(1, 5 * mm),
            Paragraph("Indices publiés par l'INSEE. Document d'information établi d'après les paramètres de chaque bail ; "
                      "seules les stipulations du bail font foi.", petit)]
-    if any(not l["gel"] and not l["decision_saisie"] for l in g["connus"]):
-        el += [Spacer(1, 5 * mm), Paragraph("Décisions du bailleur ci-dessus arrêtées le ____ / ____ / ________"
-                                            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Signature :", base)]
 
     def pied(canvas, d):
         canvas.saveState()

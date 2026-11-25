@@ -40,3 +40,17 @@ def test_gel_sans_indice_publie_reste_chiffrable():
     lignes = calcul.calculer(b, {("ILC", "2020-T4"): 100.0}, horizon=date(2022, 6, 1), aujourdhui=AUJ, decisions={("B", 1): DECISION_GEL_SANS})
     assert lignes[0].loyer_retenu == 10000 and lignes[0].statut == "❄ Gelée"
     assert calcul.loyer_actuel(b, lignes, AUJ) == 10000
+
+
+def test_plafond_applique_une_fois_par_revision_meme_triennale():
+    """Bail triennal, plafond de 10 % : la hausse est limitée à 10 % du loyer antérieur, pas à 1,1 au cube."""
+    from datetime import date
+    from indexation_loyer import calcul
+    from indexation_loyer.baux import Bail
+    b = Bail(id="T", local="", locataire="", date_effet=date(2019, 12, 1), loyer_initial_annuel_ht=13920.0, indice="ILC",
+             trimestre_base="2019-T1", periodicite_revision_ans=3, methode="Chaînée", periodicite_facturation="Mensuelle",
+             plafond_annuel_pct=10.0)
+    indices = {("ILC", "2019-T1"): 100.0, ("ILC", "2022-T1"): 104.0, ("ILC", "2025-T1"): 120.0}
+    lignes = calcul.calculer(b, indices, horizon=date(2026, 1, 1), aujourdhui=date(2026, 1, 1))
+    assert [l.loyer_retenu for l in lignes] == [14476.8, 15924.48]         # +4 % sous le plafond, puis +15,38 % ramené à +10 %
+    assert lignes[1].loyer_brut == 16704.0

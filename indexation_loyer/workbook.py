@@ -104,7 +104,7 @@ PARAMS = [  # (clé, libellé, ligne, saisie ?)
     ("charges_annuelles_ht", "Charges annuelles HT", 12, True), ("tva_pct", "TVA (%)", 13, True),
     ("periodicite_facturation", "Périodicité de facturation", 14, True), ("indice", "Indice", 15, True),
     ("trimestre_base", "Trimestre indice de base", 16, True), ("periodicite_revision_ans", "Périodicité de révision (ans)", 17, True),
-    ("methode", "Méthode", 18, True), ("plafond_annuel_pct", "Plafond annuel (%) – optionnel", 19, True),
+    ("methode", "Méthode", 18, True), ("plafond_annuel_pct", "Plafond par révision (%) – optionnel", 19, True),
     ("pennylane_customer_id", "Pennylane customer_id", 20, True), ("pennylane_product_id", "Pennylane product_id", 21, True),
     ("pennylane_subscription_id", "Pennylane subscription_id", 22, True), ("notes", "Notes / clause d'indexation", 23, True),
     ("controles", "Contrôles", 24, False),
@@ -300,7 +300,7 @@ def _feuille_lisezmoi(wb: Workbook, societe: Societe, aujourdhui: date) -> None:
     ws.cell(row=l, column=2, value="Points de vigilance juridiques (à confirmer par le juriste du dossier)").font = FONT_GRAS
     for texte in [
         "• Depuis la loi Pinel (n° 2014-626 du 18 juin 2014), l'ILC et l'ILAT sont les indices de référence des baux commerciaux (art. L145-34 et L145-38 C. com.) ; l'ICC subsiste dans les clauses des baux antérieurs.",
-        "• Plafonnement légal de la variation de l'ILC à 3,5 % pour les PME (loi n° 2022-1158 du 16 août 2022, art. 14, puis prolongation) : période et champ à vérifier bail par bail ; utiliser « Plafond annuel (%) ».",
+        "• Plafonnement légal de la variation de l'ILC à 3,5 % pour les PME (loi n° 2022-1158 du 16 août 2022, art. 14, puis prolongation) : période et champ à vérifier bail par bail ; utiliser « Plafond par révision (%) ».",
         "• Une clause d'indexation ne jouant qu'à la hausse est réputée non écrite (art. L112-1 C. mon. fin. et jurisprudence Cass. 3e civ.) : le classeur applique la baisse si l'indice recule.",
         "• Révision légale triennale (L145-38), déplafonnement et lissage : hors périmètre ; le classeur traite la clause d'échelle mobile contractuelle.",
         "• Le renoncement du bailleur à une indexation (gel) est un acte de gestion à documenter (consigne, courrier) ; sa portée juridique n'est pas tranchée par l'outil.",
@@ -624,9 +624,8 @@ def _ligne_revision(ws: Worksheet, k: int) -> None:
         ws[c("Base de calcul (annuel HT)")] = f'=IF({off},"",IF({methode}="Base fixe",{loyer0},{prec("Loyer retenu (annuel HT)")}))'
         ws[c("Loyer précédent (annuel HT)")] = f'=IF({off},"",{prec("Loyer retenu (annuel HT)")})'
     ws[c("Loyer révisé brut")] = f'=IF(OR({c("Coefficient")}="",{c("Base de calcul (annuel HT)")}=""),"",ROUND({c("Base de calcul (annuel HT)")}*{c("Coefficient")},2))'
-    annees = f'IF({methode}="Base fixe",{c("N°")}*{p},VALUE(LEFT({c("Trim. référence")},4))-VALUE(LEFT({c("Trim. précédent")},4)))'
     ws[c("Loyer retenu (annuel HT)")] = (f'=IF({off},"",IF({gel},{c("Loyer précédent (annuel HT)")},IF({c("Loyer révisé brut")}="","",'
-                                         f'IF({plafond}="",{c("Loyer révisé brut")},MIN({c("Loyer révisé brut")},ROUND({c("Base de calcul (annuel HT)")}*(1+{plafond}/100)^{annees},2))))))')
+                                         f'IF({plafond}="",{c("Loyer révisé brut")},MIN({c("Loyer révisé brut")},ROUND({c("Loyer précédent (annuel HT)")}*(1+{plafond}/100),2))))))')
     ws[c("Variation")] = f'=IF(OR({c("Loyer retenu (annuel HT)")}="",{c("Loyer précédent (annuel HT)")}=""),"",{c("Loyer retenu (annuel HT)")}/{c("Loyer précédent (annuel HT)")}-1)'
     ws[c("Loyer mensuel HT")] = f'=IF({c("Loyer retenu (annuel HT)")}="","",{c("Loyer retenu (annuel HT)")}/12)'
     ws[c("Loyer / échéance HT")] = f'=IF({c("Loyer retenu (annuel HT)")}="","",{c("Loyer retenu (annuel HT)")}/{ech_par_an})'

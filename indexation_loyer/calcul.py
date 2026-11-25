@@ -12,8 +12,9 @@ Règles (identiques aux formules) :
   base de calcul   = loyer initial si 1re révision ou méthode « Base fixe »,
                      sinon loyer retenu de la révision précédente
   loyer brut       = ARRONDI(base × coefficient ; 2)
-  loyer retenu     = MIN(brut ; base × (1 + plafond)^(années couvertes)) si un plafond est saisi
-                     (années couvertes = écart d'années entre l'indice de référence et l'indice de départ)
+  loyer retenu     = MIN(brut ; loyer précédent × (1 + plafond)) si un plafond est saisi :
+                     la hausse est limitée à chaque révision, quelle que soit sa périodicité (annuelle,
+                     biennale, triennale), en pourcentage du loyer antérieur
   gel              = loyer retenu = loyer précédent ; statut « ❄ Gelée »
   loyer précédent  = loyer initial si 1re révision, sinon loyer retenu précédent
 """
@@ -106,13 +107,9 @@ def calculer(bail: Bail, indices: dict[tuple[str, str], float], horizon: date,
             coef = i_ref / i_prec
             brut = arrondi_excel(base * coef)
             retenu = brut
-            if bail.plafond_annuel_pct is not None:
-                # années couvertes par le coefficient : depuis l'indice de base (base fixe) ou depuis
-                # le trimestre précédent effectif (chaînée ; = 2 périodes après un gel avec rattrapage)
-                annees = ech.numero * bail.periodicite_revision_ans if bail.methode == "Base fixe" \
-                    else int(ech.trimestre_reference[:4]) - int(t_prec_eff[:4])
-                plafond = base * (1 + bail.plafond_annuel_pct / 100) ** annees
-                retenu = min(brut, arrondi_excel(plafond))
+            if bail.plafond_annuel_pct is not None and loyer_prec is not None:
+                # plafond par révision : la hausse ne dépasse pas le pourcentage saisi du loyer antérieur
+                retenu = min(brut, arrondi_excel(loyer_prec * (1 + bail.plafond_annuel_pct / 100)))
 
         if est_gel(decision):
             statut = STATUT_GELEE

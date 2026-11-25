@@ -16,7 +16,7 @@
       <dt>Loyer en vigueur annuel</dt><dd>{{ sit.bail.loyer_attendu_annuel | eur2 }}</dd>
       <dt>Charges annuelles</dt><dd>{{ sit.bail.charges_annuelles | eur2 }}</dd>
       <dt>Par échéance, {{ sit.bail.periodicite | lower }}</dt><dd>{{ (sit.attendu_annuel / n) | eur2 }} HT</dd>
-      <dt>Indice</dt><dd>{{ sit.bail.indice }}{% if sit.bail.calcule %}, départ {{ sit.bail.trimestre_base }}, {{ sit.bail.methode | lower }}, {{ 'révision annuelle' if sit.bail.periodicite_revision_ans == 1 else 'révision tous les ' ~ sit.bail.periodicite_revision_ans ~ ' ans' }}{% if sit.bail.plafond_annuel_pct is not none %}, plafond {{ ('%g' | format(sit.bail.plafond_annuel_pct)) | replace('.', ',') }} % par an{% endif %}{% endif %}</dd>
+      <dt>Indice</dt><dd>{{ sit.bail.indice }}{% if sit.bail.calcule %}, départ {{ sit.bail.trimestre_base }}, {{ sit.bail.methode | lower }}, {{ 'révision annuelle' if sit.bail.periodicite_revision_ans == 1 else 'révision tous les ' ~ sit.bail.periodicite_revision_ans ~ ' ans' }}{% if sit.bail.plafond_annuel_pct is not none %}, plafond {{ ('%g' | format(sit.bail.plafond_annuel_pct)) | replace('.', ',') }} % par révision{% endif %}{% endif %}</dd>
       <dt>Dernière révision</dt><dd>{{ sit.bail.date_derniere_revision | date_fr }} · {{ sit.bail.statut_revision }}</dd>
       <dt>Prochaine révision</dt><dd>{{ sit.bail.date_prochaine_revision | date_fr }}</dd>
       <dt>Loyer après cette révision</dt><dd>{% if sit.bail.loyer_prochain_annuel is not none %}{{ sit.bail.loyer_prochain_annuel | eur2 }} par an{% else %}<span class="discret">inconnu, indice non publié</span>{% endif %}</dd>

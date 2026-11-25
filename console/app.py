@@ -736,16 +736,18 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
     # ------------------------------------------- situation des loyers, pour le bailleur
     @app.get("/dossiers/{code}/situation-loyers.pdf")
     def situation_loyers(code: str):
-        """À date : loyers en cours, nouveaux loyers connus à soumettre au bailleur, révisions en attente d'indice."""
+        """À date, pour le gérant : loyers réindexés sur douze mois, réindexations à venir avec ou sans indice publié."""
         d = dossier_ou_404(code)
-        an = analyses(code)
-        lignes = [l for l in pilotage(an, 3650)]
-        suivis = {l["bail"]["id"] for l in lignes}
-        autres = [s.bail for s in an[0]["situations"] if s.bail["id"] not in suivis and not s.bail.get("date_sortie")]
-        if not lignes and not autres:
+        baux = []
+        for b in depot.charger(cx, code, jour(), chemin_indices)[0]["baux"]:
+            if b.get("date_sortie") and str(b["date_sortie"])[:10] <= jour().isoformat():
+                continue                                 # locataire sorti
+            baux.append({"bail": b, "revisions": revisions(b)[1] if b.get("calcule") and b.get("date_effet") else []})
+        if not baux:
             raise HTTPException(404, "Aucun bail dans ce dossier.")
-        contenu = editions.situation_loyers(d, lignes, autres, jour(), fictif=d["source_referentiel"] == FICTIF)
-        referentiel.tracer(cx, "Situation des loyers éditée", f"{len(lignes) + len(autres)} ligne(s)", code)
+        groupes = editions.lignes_situation(baux, jour())
+        contenu = editions.situation_loyers(d, groupes, jour(), fictif=d["source_referentiel"] == FICTIF)
+        referentiel.tracer(cx, "Situation des loyers éditée", f"{len(baux)} bail/baux", code)
         cx.commit()
         return Response(contenu, media_type="application/pdf", headers={
             "Content-Disposition": f'inline; filename="{code}_situation_loyers_{jour():%Y-%m-%d}.pdf"'})
