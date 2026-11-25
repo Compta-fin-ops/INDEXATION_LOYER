@@ -128,3 +128,5 @@ tr.a-venir td { background: color-mix(in srgb, var(--fond) 60%, transparent); }
 body.env-test .entete { border-bottom: 3px solid #6d28d9; }
 a.tuile { color: inherit; display: block; }
 a.tuile:hover { text-decoration: none; border-color: var(--marque); }
+
+pre.mention { white-space: pre-wrap; font-family: inherit; font-size: 13px; line-height: 1.5; margin: 0; }

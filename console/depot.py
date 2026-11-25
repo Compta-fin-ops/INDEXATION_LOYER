@@ -1,6 +1,7 @@
 """Lecture et écriture de la base : baux, collecte Pennylane, reprise d'un classeur, chargements."""
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from datetime import date, datetime
@@ -122,15 +123,16 @@ def synchroniser(cx: sqlite3.Connection, client: Client, codes: list[str] | None
         cx.execute("DELETE FROM abonnements WHERE dossier=?", (code,))
         cx.execute("DELETE FROM factures WHERE dossier=?", (code,))
         cx.executemany("""INSERT INTO abonnements (id, dossier, customer_id, label, statut, mode, debut, fin,
-                          prochaine_occurrence, occurrence_precedente, type_regle, intervalle, montant_ht)
+                          prochaine_occurrence, occurrence_precedente, type_regle, intervalle, montant_ht, parametres)
                           VALUES (:id, :dossier, :customer_id, :label, :statut, :mode, :debut, :fin,
-                          :prochaine_occurrence, :occurrence_precedente, :type_regle, :intervalle, :montant_ht)""",
-                       [{**a, "dossier": code} for a in abos])
+                          :prochaine_occurrence, :occurrence_precedente, :type_regle, :intervalle, :montant_ht, :parametres)""",
+                       [{**a, "dossier": code,
+                         "parametres": json.dumps(a["parametres"], ensure_ascii=False) if a.get("parametres") else ""} for a in abos])
         cx.executemany("""INSERT INTO factures (id, dossier, customer_id, subscription_id, numero, libelle, date,
-                          echeance, montant_ht, montant_ttc, restant_du, statut)
+                          echeance, montant_ht, montant_ttc, restant_du, statut, reference)
                           VALUES (:id, :dossier, :customer_id, :subscription_id, :numero, :libelle, :date,
-                          :echeance, :montant_ht, :montant_ttc, :restant_du, :statut)""",
-                       [{**f, "dossier": code} for f in facts])
+                          :echeance, :montant_ht, :montant_ttc, :restant_du, :statut, :reference)""",
+                       [{"reference": "", **f, "dossier": code} for f in facts])
         cx.execute("UPDATE dossiers SET derniere_synchro=? WHERE code=?", (horodatage, code))
         cx.execute("INSERT INTO synchros (horodatage, dossier, source, abonnements, factures) VALUES (?,?,?,?,?)",
                    (horodatage, code, source, len(abos), len(facts)))
@@ -163,6 +165,19 @@ def charger(cx: sqlite3.Connection, code: str | None = None, aujourdhui: date | 
                     indices = calcul.table_indices(referentiel.lire_indices(chemin_indices))
                 b.update(referentiel.deriver(b, indices, decisions.get(b["id"], {}), aujourdhui))
                 b["revisions_non_appliquees"] = 0        # la console le constate sur l'abonnement, plus de case à cocher
-        sortie.append({"dossier": dict(d), "baux": baux,
-                       "abonnements": lire("abonnements", "debut"), "factures": lire("factures", "date DESC")})
+        abonnements = lire("abonnements", "debut")
+        for a in abonnements:                            # paramètres et lignes lus dans Pennylane, conservés en JSON
+            try:
+                a["parametres"] = json.loads(a["parametres"]) if a.get("parametres") else {}
+            except ValueError:
+                a["parametres"] = {}
+        # ce que la console a créé elle-même se rattache au bail par son journal, sans rien deviner
+        liens = {"abonnements": {}, "factures": {}}
+        for e in cx.execute("SELECT bail_id, subscription_id, facture_id FROM envois WHERE dossier=? AND etat='créé'", (d["code"],)):
+            if e["subscription_id"]:
+                liens["abonnements"][e["subscription_id"]] = e["bail_id"]
+            if e["facture_id"]:
+                liens["factures"][e["facture_id"]] = e["bail_id"]
+        sortie.append({"dossier": dict(d), "baux": baux, "abonnements": abonnements,
+                       "factures": lire("factures", "date DESC"), "liens": liens})
     return sortie

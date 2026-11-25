@@ -14,8 +14,12 @@
       <dt>Par occurrence</dt><dd>{% for l in prop.corps.customer_invoice_data.invoice_lines %}{{ l.raw_currency_unit_price | float | eur2 }} HT · {{ l.label }}{% if not loop.last %}<br>{% endif %}{% endfor %}</dd>
       <dt>Factures générées</dt><dd>en brouillon, à valider dans Pennylane</dd>
       <dt>Client Pennylane</dt><dd>{{ prop.corps.customer_id or '—' }}</dd>
+      <dt>Paiement</dt><dd>{{ CONDITIONS.get(prop.corps.payment_conditions, prop.corps.payment_conditions) }} · {{ PAIEMENTS.get(prop.corps.payment_method, prop.corps.payment_method) }}</dd>
+      {% if prop.reprise %}<dt>Modèle</dt><dd>abonnement n° {{ prop.reprise.abonnement }} : {{ 'paramètres et lignes repris' if prop.reprise.lignes else 'paramètres repris, lignes reconstruites d’après le bail' }}</dd>{% endif %}
     </dl>
     <p class="discret petit" style="margin: 12px 0 0">{{ prop.note }}.</p>
+    <p class="petit fort" style="margin: 12px 0 4px">Mention portée sur chaque facture</p>
+    <pre class="mention">{{ prop.corps.customer_invoice_data.special_mention }}</pre>
     <p class="petit" style="margin: 8px 0 0"><span class="fort">Ce que la console ne fait pas :</span> elle ne modifie, n'arrête et ne supprime aucun abonnement ni aucune facture. Elle ajoute un abonnement nouveau, rien d'autre.</p>
   </div>
   <div class="carte">

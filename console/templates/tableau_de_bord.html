@@ -19,7 +19,7 @@
 
 <div class="carte" id="reindexations">
   <h2>Réindexations à piloter</h2>
-  <p class="discret petit" style="margin: -6px 0 12px">Révisions échues sans indice, et prochaine révision de chaque bail sous {{ horizon }} jours.
+  <p class="discret petit" style="margin: -6px 0 12px">Révisions échues sans indice, et prochaine révision de chaque bail sous {{ horizon }} jours. <a href="/creations">Créer en lot les abonnements et les rappels prêts</a>.
     Horizon : {% for h in (60, 90, 180, 365) %}{% if h == horizon %}<span class="fort">{{ h }} j</span>{% else %}<a href="/?horizon={{ h }}#reindexations">{{ h }} j</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</p>
   <div class="defile"><table>
     <thead><tr><th>Révision</th><th>Dossier</th><th>Bail</th><th>Indice</th><th class="num">Loyer avant</th><th class="num">Loyer révisé</th><th>Courrier</th><th>Abonnement suivant</th><th>À faire</th></tr></thead>

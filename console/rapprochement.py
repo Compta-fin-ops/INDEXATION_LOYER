@@ -6,6 +6,8 @@ Chaque écart porte une gravité : « bloquant » (de l'argent n'est pas factur�
 """
 from __future__ import annotations
 
+import calendar
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import date, timedelta
 
@@ -23,6 +25,14 @@ DELAI_BROUILLON = 7               # jours au-delà desquels une facture en broui
 # taux de TVA admis sur un bail et code Pennylane correspondant (énumération vat_rate de l'API) ;
 # 8,5 % : taux normal des départements d'outre-mer
 CODES_TVA = {20.0: "FR_200", 10.0: "FR_100", 8.5: "FR_85", 5.5: "FR_55", 2.1: "FR_21", 0.0: "exempt"}
+REVISIONS_DANS_LA_MENTION = 4     # au-delà, les révisions les plus anciennes sont résumées en une ligne
+JOURS_PAIEMENT = {"upon_receipt": 0, "7_days": 7, "15_days": 15, "30_days": 30, "30_days_end_of_month": 30,
+                  "45_days": 45, "45_days_end_of_month": 45, "60_days": 60}
+LIBELLE_PAIEMENT = {"offline": "hors prélèvement", "gocardless_direct_debit": "prélèvement GoCardless",
+                    "pro_account_sepa_core": "prélèvement SEPA du compte pro Pennylane"}
+LIBELLE_CONDITIONS = {"upon_receipt": "à réception", "7_days": "7 jours", "15_days": "15 jours", "30_days": "30 jours",
+                      "30_days_end_of_month": "30 jours fin de mois", "45_days": "45 jours",
+                      "45_days_end_of_month": "45 jours fin de mois", "60_days": "60 jours"}
 STATUTS_HORS_FACTURE = ("cancelled", "credit_note", "proforma", "shipping_order", "purchasing_order",
                         "estimate_pending", "estimate_accepted", "estimate_invoiced", "estimate_denied")
 
@@ -58,6 +68,7 @@ class SituationBail:
     ecarts: list[Ecart] = field(default_factory=list)
     proposition: dict | None = None
     rappel: dict | None = None              # loyer dû et non facturé depuis la dernière révision
+    rappel_facture: dict | None = None      # facture de rappel de cette révision déjà présente dans Pennylane
 
     @property
     def gravite(self) -> str:
@@ -97,14 +108,16 @@ def ajouter_mois(d: date, n: int) -> date:
 # ---------------------------------------------------------------------------
 # Rattachement des abonnements aux baux
 # ---------------------------------------------------------------------------
-def rattacher(baux: list[dict], abonnements: list[dict]) -> tuple[dict[int, list[dict]], list[dict]]:
+def rattacher(baux: list[dict], abonnements: list[dict], crees: dict | None = None) -> tuple[dict[int, list[dict]], list[dict]]:
     """Retourne ({id du bail: abonnements}, abonnements orphelins) pour UN dossier.
 
-    Ordre : identifiant d'abonnement inscrit sur le bail, puis client Pennylane ; si un même
-    client porte plusieurs baux, l'abonnement va au bail dont le loyer par échéance est le plus proche."""
+    Ordre : abonnement créé par la console pour ce bail (`crees`, tiré du journal des envois), identifiant
+    d'abonnement inscrit sur le bail, puis client Pennylane ; si un même client porte plusieurs baux,
+    l'abonnement va au bail dont le loyer par échéance est le plus proche."""
     par_bail: dict[int, list[dict]] = {b["id"]: [] for b in baux}
     restants = []
-    explicites = {b["subscription_id"]: b["id"] for b in baux if b.get("subscription_id")}
+    explicites = {k: v for k, v in (crees or {}).items() if v in par_bail}
+    explicites.update({b["subscription_id"]: b["id"] for b in baux if b.get("subscription_id")})
     for a in abonnements:
         if a["id"] in explicites:
             par_bail[explicites[a["id"]]].append(a)
@@ -191,11 +204,18 @@ def analyser_bail(bail: dict, abonnements: list[dict], factures: list[dict], auj
             if derniere and debut and derniere > debut or (bail.get("revisions_non_appliquees") or 0) > 0 or (
                     derniere and a_l_ancien_loyer):
                 s.rappel = calculer_rappel(bail, c, derniere, aujourdhui)
+                if s.rappel:                             # le rappel de cette révision est-il déjà dans Pennylane ?
+                    s.rappel_facture = next((f for f in factures if f.get("statut") != "cancelled"
+                                             and f.get("reference") == reference_rappel(bail, derniere)), None)
+                deja_rappele = s.rappel_facture is not None
                 e("REVISION_NON_REPERCUTEE", "bloquant",
                   f"Révision du {_fr(derniere)} non répercutée dans l'abonnement",
                   detail=f"Attendu {_eur(_attendu_echeance(bail))} par échéance, facturé {_eur(c['montant_ht'])} : "
                          f"{sens} de {_eur(abs(ecart))} par an."
-                         + (f" Rappel à facturer : {_eur(s.rappel['montant'])} HT pour {s.rappel['echeances']} échéance(s)."
+                         + (f" Rappel déjà créé : facture du {_fr(_d(s.rappel_facture.get('date')))}, "
+                            + ("en brouillon, à valider dans Pennylane." if s.rappel_facture.get("statut") == "draft" else "validée.")
+                            if deja_rappele else
+                            f" Rappel à facturer : {_eur(s.rappel['montant'])} HT pour {s.rappel['echeances']} échéance(s)."
                             if s.rappel and s.rappel["echeances"] else ""),
                   action="Clore l'abonnement en cours et créer celui de la période au loyer révisé", montant=ecart)
             else:
@@ -250,7 +270,7 @@ def analyser_bail(bail: dict, abonnements: list[dict], factures: list[dict], auj
               action="Relancer le locataire", montant=f["restant_du"])
 
     if any(x.type in ("TERME_ECHU", "SANS_ABONNEMENT", "RENOUVELLEMENT", "REVISION_NON_REPERCUTEE") for x in s.ecarts):
-        s.proposition = proposer_abonnement(bail, s.courant, aujourdhui, reglages)
+        s.proposition = proposer_abonnement(bail, s.courant, aujourdhui, reglages, s.courant or s.dernier_termine)
     return s
 
 
@@ -275,11 +295,134 @@ def calculer_rappel(bail: dict, courant: dict, derniere: date | None, aujourdhui
             "depuis": derniere.isoformat()}
 
 
+def reference_rappel(bail: dict, revision: date) -> str:
+    """Référence externe inscrite sur la facture de rappel : elle relie la facture Pennylane au bail et à la révision."""
+    return f"console-{bail['dossier']}-{bail['code']}-rappel-{revision.isoformat()}"
+
+
+def echeance_paiement(jour: date, conditions: str | None) -> date:
+    """Date limite de paiement d'une facture datée de `jour`, selon les conditions de l'abonnement."""
+    d = jour + timedelta(days=JOURS_PAIEMENT.get(conditions or "", 0))
+    if (conditions or "").endswith("end_of_month"):
+        d = d.replace(day=calendar.monthrange(d.year, d.month)[1])
+    return d
+
+
+# ---------------------------------------------------------------------------
+# Mention portée sur les factures : le suivi des révisions du bail
+# ---------------------------------------------------------------------------
+def mention_speciale(bail: dict, a_la_date: date) -> str:
+    """Historique du loyer à reporter sur la facture, arrêté à `a_la_date` ; vide pour un bail non calculé.
+
+    Indice et loyer de départ, une ligne par révision passée, puis la date de la prochaine. Au-delà de
+    REVISIONS_DANS_LA_MENTION révisions, les plus anciennes sont résumées par le loyer qu'elles ont donné."""
+    suivi = bail.get("suivi")
+    if not suivi:
+        return ""
+    limite = a_la_date.isoformat()
+    passees = [r for r in suivi["revisions"] if r["date"] <= limite and r["texte"]]
+    lignes = list(suivi["entete"])
+    if len(passees) > REVISIONS_DANS_LA_MENTION:
+        anciennes, passees = passees[:-(REVISIONS_DANS_LA_MENTION - 1)], passees[-(REVISIONS_DANS_LA_MENTION - 1):]
+        resume = next((r for r in reversed(anciennes) if r["loyer"]), None)
+        if resume:
+            lignes.append(f"Révisions jusqu'au {_fr(_d(resume['date']))} : loyer porté à {resume['loyer']}.")
+    lignes += [r["texte"] for r in passees]
+    prochaine = next((r for r in suivi["revisions"] if r["date"] > limite), None)
+    if prochaine:
+        lignes.append(f"Prochaine ré-indexation {suivi['frequence']} du loyer au {_fr(_d(prochaine['date']))}."
+                      .replace("  ", " "))
+    return "\n".join(lignes)
+
+
+# ---------------------------------------------------------------------------
+# Reprise des paramètres d'un abonnement existant
+# ---------------------------------------------------------------------------
+def _ligne_reprise(l: dict, unite: str) -> dict:
+    """Ligne lue dans Pennylane vers une ligne de création, à l'identique."""
+    q = l["quantite"]
+    sortie = {"label": l["label"] or "Loyer", "quantity": int(q) if q == int(q) else q, "unit": l["unit"] or unite,
+              "raw_currency_unit_price": l["prix"], "vat_rate": l["tva"]}
+    if l.get("description"):
+        sortie["description"] = l["description"]
+    if l.get("produit"):
+        sortie["product_id"] = l["produit"]
+    if l.get("section") is not None:
+        sortie["section_rank"] = l["section"]
+    if l.get("remise"):
+        sortie["discount"] = l["remise"]
+    return sortie
+
+
+def reprendre_lignes(modele: dict | None, bail: dict, loyer_echeance: float) -> dict:
+    """Lignes d'un nouvel abonnement recopiées de `modele`, la ligne de loyer portée à `loyer_echeance`.
+
+    La ligne de charges est celle dont le montant est la provision du bail ; la ligne de loyer est la plus
+    forte des autres ; toute autre ligne est recopiée telle quelle. Si la console ne sait pas dire avec
+    certitude quelle ligne est le loyer, elle ne reprend rien (`lignes` vaut None) et dit pourquoi (`motif`)."""
+    vide = {"lignes": None, "detail": [], "motif": "", "ligne_loyer": None}
+    if not modele:
+        return vide
+    p = modele.get("parametres") or {}
+    lues = p.get("lignes")
+    refus = lambda motif: {**vide, "motif": motif}
+    if lues is None:
+        return refus(f"les lignes de l'abonnement n° {modele['id']} n'ont pas été lues dans Pennylane"
+                     + (f" ({p['erreur_lignes']})" if p.get("erreur_lignes") else " : actualiser"))
+    if not lues:
+        return refus(f"l'abonnement n° {modele['id']} n'a aucune ligne")
+    if p.get("remise"):
+        return refus(f"l'abonnement n° {modele['id']} porte une remise globale, que la console ne reconduit pas")
+    montant = lambda l: round(l["quantite"] * float(l["prix"]), 2)
+    n = ECHEANCES_PAR_AN.get(bail.get("periodicite"), 12)
+    charges = round((bail.get("charges_annuelles") or 0) / n, 2)
+    i_charges = None
+    if charges > 0:
+        candidats = [i for i, l in enumerate(lues) if abs(montant(l) - charges) <= 0.02]
+        if not candidats:
+            return refus(f"aucune ligne de l'abonnement n° {modele['id']} ne vaut la provision sur charges du bail "
+                         f"({_eur(charges)} par échéance)")
+        i_charges = next((i for i in candidats if "charge" in lues[i]["label"].lower()), candidats[0])
+    reste = [i for i in range(len(lues)) if i != i_charges]
+    if not reste:
+        return refus(f"l'abonnement n° {modele['id']} n'a pas de ligne de loyer distincte des charges")
+    i_loyer = max(reste, key=lambda i: montant(lues[i]))
+    if lues[i_loyer]["quantite"] != 1 or lues[i_loyer].get("remise"):
+        return refus(f"la ligne de loyer de l'abonnement n° {modele['id']} porte une quantité ou une remise")
+    unite = UNITE.get(bail.get("periodicite"), "mois")
+    lignes, detail = [], []
+    for i, l in enumerate(lues):
+        nouvelle = _ligne_reprise(l, unite)
+        if i == i_loyer:
+            nouvelle["raw_currency_unit_price"] = f"{loyer_echeance:.2f}"
+        lignes.append(nouvelle)
+        detail.append({"label": nouvelle["label"], "role": "loyer" if i == i_loyer else "charges" if i == i_charges else "autre",
+                       "ancien": montant(l), "nouveau": loyer_echeance if i == i_loyer else montant(l)})
+    return {"lignes": lignes, "detail": detail, "motif": "", "ligne_loyer": lues[i_loyer]}
+
+
+def _reprise(modele: dict | None, repris: dict, mention: str) -> dict | None:
+    """Ce que la proposition doit à l'abonnement existant, pour l'affichage et les contrôles."""
+    if not modele:
+        return None
+    p = modele.get("parametres") or {}
+    return {"abonnement": modele["id"], "lignes": repris["lignes"] is not None, "detail": repris["detail"],
+            "motif": repris["motif"], "conditions": LIBELLE_CONDITIONS.get(p.get("conditions"), p.get("conditions") or ""),
+            "paiement": LIBELLE_PAIEMENT.get(p.get("paiement"), p.get("paiement") or ""),
+            "prelevement": p.get("paiement") not in (None, "", "offline"), "modele_facture": p.get("modele"),
+            "tva_loyer": (repris["ligne_loyer"] or {}).get("tva"),
+            "mention_remplacee": p.get("mention") if p.get("mention") and p.get("mention") != mention else ""}
+
+
 # ---------------------------------------------------------------------------
 # Proposition d'abonnement : une période d'indexation, bornée par count
 # ---------------------------------------------------------------------------
-def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, reglages: dict | None = None) -> dict:
-    """Corps de POST /billing_subscriptions pour la période allant jusqu'à la prochaine révision."""
+def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, reglages: dict | None = None,
+                        modele: dict | None = None) -> dict:
+    """Corps de POST /billing_subscriptions pour la période allant jusqu'à la prochaine révision.
+
+    `modele` : abonnement existant dont la proposition reprend les paramètres (conditions et mode de paiement,
+    modèle de facture, textes, lignes). Seuls changent le loyer, les dates et la mention de suivi des révisions."""
     reglages = reglages or {}
     periodicite = bail.get("periodicite") or "Mensuelle"
     pas = INTERVALLE_MOIS.get(periodicite, 1)
@@ -320,24 +463,36 @@ def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, regl
     if (bail.get("charges_annuelles") or 0) > 0:
         lignes.append({"label": "Provision sur charges", "quantity": 1, "unit": unite,
                        "raw_currency_unit_price": f"{bail['charges_annuelles'] / n:.2f}", "vat_rate": tva})
+    p = (modele or {}).get("parametres") or {}
+    repris = reprendre_lignes(modele, bail, round(loyer / n, 2))
+    if repris["lignes"] is not None:                 # lignes de l'abonnement existant, seul le prix du loyer change
+        lignes, tva = repris["lignes"], repris["ligne_loyer"]["tva"] or tva
+    mention = (mention_speciale(bail, debut) or p.get("mention")
+               or f"Loyer indexé sur l'{bail.get('indice', '')}" + (f", révisé le {_fr(revise_le)}" if revise_le and loyer_connu else "") + ".")
+    donnees = {"currency": p.get("devise") or "EUR", "language": p.get("langue") or "fr_FR",
+               "pdf_invoice_subject": p.get("objet") or f"Loyer {bail.get('local', '')}", "special_mention": mention}
+    if p.get("modele"):
+        donnees["customer_invoice_template_id"] = p["modele"]
+    if p.get("texte_libre"):
+        donnees["pdf_invoice_free_text"] = p["texte_libre"]
+    if p.get("description"):
+        donnees["pdf_description"] = p["description"]
+    if repris["lignes"] is not None and p.get("sections"):
+        donnees["invoice_line_sections"] = p["sections"]
+    donnees["invoice_lines"] = lignes
     corps = {
         "customer_id": bail.get("customer_id"),
-        "label": f"Loyer {bail.get('local', '')}",
+        "label": (modele or {}).get("label") or f"Loyer {bail.get('local', '')}",
         "start": debut.isoformat(),
         "mode": {"type": reglages.get("mode", "awaiting_validation")},
-        "payment_conditions": reglages.get("payment_conditions", "upon_receipt"),
-        "payment_method": reglages.get("payment_method", "offline"),
+        "payment_conditions": p.get("conditions") or reglages.get("payment_conditions", "upon_receipt"),
+        "payment_method": p.get("paiement") or reglages.get("payment_method", "offline"),
         "recurring_rule": regle,
-        "customer_invoice_data": {
-            "currency": "EUR", "language": "fr_FR", "pdf_invoice_subject": f"Loyer {bail.get('local', '')}",
-            "special_mention": (f"Loyer indexé sur l'{bail.get('indice', '')}"
-                                + (f", révisé le {_fr(revise_le)}" if revise_le and loyer_connu else "") + "."),
-            "invoice_lines": lignes,
-        },
+        "customer_invoice_data": donnees,
     }
     dernier = ajouter_mois(debut, pas * (count - 1)) if count else None
     return {"corps": corps, "debut": debut.isoformat(), "occurrences": count,
-            "derniere_occurrence": dernier.isoformat() if dernier else None,
+            "derniere_occurrence": dernier.isoformat() if dernier else None, "reprise": _reprise(modele, repris, mention),
             "envoyable": bail.get("customer_id") is not None and tva is not None, "tva_connue": tva is not None,
             "loyer_connu": loyer_connu, "periode_revisee": periode_revisee, "loyer_annuel": loyer,
             "note": ("Loyer révisé inconnu : l'indice de la révision du " + _fr(revise_le) + " n'est pas publié. "
@@ -369,18 +524,36 @@ def proposer_facture_rappel(bail: dict, courant: dict | None, aujourdhui: date) 
     periodicite = bail.get("periodicite") or "Mensuelle"
     taux = bail.get("tva_pct")
     tva = CODES_TVA.get(float(taux) if taux is not None else 20.0)
-    reference = f"console-{bail['dossier']}-{bail['code']}-rappel-{derniere.isoformat()}"
+    reference = reference_rappel(bail, derniere)
     periode = (f"échéances du {_fr(dates[0])} au {_fr(dates[-1])}" if len(dates) > 1 else f"échéance du {_fr(dates[0])}") if dates else ""
+    # la facture reprend de l'abonnement resté à l'ancien loyer : conditions de paiement, modèle, langue, et pour sa
+    # ligne l'unité, la TVA et le produit de la ligne de loyer
+    p = courant.get("parametres") or {}
+    repris = reprendre_lignes(courant, bail, _attendu_echeance(bail) - round((bail.get("charges_annuelles") or 0)
+                                                                              / ECHEANCES_PAR_AN.get(periodicite, 12), 2))
+    modele_ligne = repris["ligne_loyer"] or {}
+    tva = modele_ligne.get("tva") or tva
+    suivi = mention_speciale(bail, aujourdhui)
+    ligne = {"label": f"Rappel de loyer, révision du {_fr(derniere)} – {periode}", "quantity": len(dates),
+             "unit": modele_ligne.get("unit") or UNITE.get(periodicite, "mois"), "raw_currency_unit_price": f"{ecart:.2f}", "vat_rate": tva}
+    if modele_ligne.get("produit"):
+        ligne["product_id"] = modele_ligne["produit"]
     corps = {
-        "date": aujourdhui.isoformat(), "deadline": aujourdhui.isoformat(), "customer_id": bail.get("customer_id"),
-        "draft": True, "currency": "EUR", "language": "fr_FR", "external_reference": reference,
+        "date": aujourdhui.isoformat(), "deadline": echeance_paiement(aujourdhui, p.get("conditions")).isoformat(),
+        "customer_id": bail.get("customer_id"),
+        "draft": True, "currency": p.get("devise") or "EUR", "language": p.get("langue") or "fr_FR", "external_reference": reference,
         "pdf_invoice_subject": f"Rappel de loyer – {bail.get('local', '')}",
         "special_mention": (f"Rappel de loyer consécutif à la révision du {_fr(derniere)}, indexée sur l'{bail.get('indice', '')} : "
-                            f"{periode}, soit {len(dates)} échéance(s) à {_eur(ecart)} hors taxes."),
-        "invoice_lines": [{"label": f"Rappel de loyer, révision du {_fr(derniere)} – {periode}", "quantity": len(dates),
-                           "unit": UNITE.get(periodicite, "mois"), "raw_currency_unit_price": f"{ecart:.2f}", "vat_rate": tva}],
+                            f"{periode}, soit {len(dates)} échéance(s) à {_eur(ecart)} hors taxes."
+                            + ("\n" + suivi if suivi else "")),
+        "invoice_lines": [ligne],
     }
+    if p.get("modele"):
+        corps["customer_invoice_template_id"] = p["modele"]
+    if p.get("texte_libre"):
+        corps["pdf_invoice_free_text"] = p["texte_libre"]
     return {"corps": corps, "reference": reference, "date_revision": derniere.isoformat(), "echeances": len(dates),
+            "reprise": _reprise(courant, repris, "") if p else None,
             "du": dates[0].isoformat() if dates else None, "au": dates[-1].isoformat() if dates else None,
             "ecart_par_echeance": ecart, "montant_ht": round(len(dates) * ecart, 2), "borne": fin is not None,
             "tva_connue": tva is not None, "debut": f"rappel-{derniere.isoformat()}"}
@@ -389,18 +562,45 @@ def proposer_facture_rappel(bail: dict, courant: dict | None, aujourdhui: date) 
 # ---------------------------------------------------------------------------
 # Analyse d'un dossier et synthèses
 # ---------------------------------------------------------------------------
+def origine_facture(f: dict, creees: dict) -> str:
+    """D'où vient une facture : la chaîne entre Pennylane et la console, lisible sur la page du bail."""
+    reference = f.get("reference") or ""
+    rappel = re.search(r"-rappel-(\d{4}-\d{2}-\d{2})$", reference) if reference.startswith("console-") else None
+    if rappel:
+        return f"Rappel de la révision du {_fr(_d(rappel.group(1)))}, créé par la console"
+    if f.get("id") in creees:
+        return "Créée par la console"
+    if f.get("subscription_id"):
+        return f"Abonnement n° {f['subscription_id']}"
+    return "Hors abonnement"
+
+
 def analyser_dossier(dossier: dict, baux: list[dict], abonnements: list[dict], factures: list[dict],
-                     aujourdhui: date, reglages: dict | None = None) -> dict:
-    par_bail, orphelins = rattacher(baux, abonnements)
+                     aujourdhui: date, reglages: dict | None = None, liens: dict | None = None) -> dict:
+    """`liens` : ce que la console a créé elle-même, d'après son journal ({"abonnements": {id: bail}, "factures": {id: bail}})."""
+    liens = liens or {}
+    creees = liens.get("factures") or {}
+    par_bail, orphelins = rattacher(baux, abonnements, liens.get("abonnements"))
+    bail_de_l_abonnement = {a["id"]: bail_id for bail_id, abos in par_bail.items() for a in abos}
+    prefixes = {f"console-{b['dossier']}-{b['code']}-rappel-": b["id"] for b in baux}
+
+    def proprietaire(f: dict) -> int | None:
+        """Bail auquel la facture appartient à coup sûr : créée par la console pour lui, ou née d'un de ses abonnements."""
+        if f.get("id") in creees:
+            return creees[f["id"]]
+        for prefixe, bail_id in prefixes.items():
+            if (f.get("reference") or "").startswith(prefixe):
+                return bail_id
+        return bail_de_l_abonnement.get(f.get("subscription_id"))
+
     fact_client: dict = {}
     for f in factures:
-        fact_client.setdefault(f.get("customer_id"), []).append(f)
+        fact_client.setdefault(f.get("customer_id"), []).append({**f, "origine": origine_facture(f, creees)})
     situations = []
     for b in baux:
-        ids = {a["id"] for a in par_bail[b["id"]]}
         clients_partages = sum(1 for x in baux if x.get("customer_id") == b.get("customer_id")) > 1
         fs = [f for f in fact_client.get(b.get("customer_id"), [])
-              if not clients_partages or f.get("subscription_id") in ids or f.get("subscription_id") is None]
+              if proprietaire(f) == b["id"] or (proprietaire(f) is None and (not clients_partages or f.get("subscription_id") is None))]
         situations.append(analyser_bail(b, par_bail[b["id"]], sorted(fs, key=lambda f: f.get("date") or "", reverse=True),
                                         aujourdhui, reglages))
     ecarts = [e for s in situations for e in s.ecarts]

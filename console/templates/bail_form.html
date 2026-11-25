@@ -50,6 +50,7 @@
     <label>Date de la dernière révision appliquée<input type="date" name="reprise_date" value="{{ (b.reprise_date or '')[:10] }}"><span class="aide">Les révisions suivantes tombent à ses dates anniversaires.</span></label>
     <label>Loyer annuel HT à cette date<input name="reprise_loyer_annuel" value="{{ nb(b.reprise_loyer_annuel) }}" inputmode="decimal"><span class="aide">Le loyer réellement en vigueur, hors charges.</span></label>
     <label>Trimestre de l'indice appliqué<input name="reprise_trimestre" value="{{ b.reprise_trimestre or '' }}" placeholder="2024-T2"><span class="aide">Celui appliqué à cette révision. La suivante prendra le même trimestre, une période plus tard.</span></label>
+    <label class="large">Historique à reporter sur les factures<textarea name="mention_historique" rows="5" placeholder="Révision au 01/10/2023 : application du plafonnement de l'ILC, variation de l'indice de 3,5 %.">{{ b.mention_historique or '' }}</textarea><span class="aide">Les révisions d'avant la reprise, telles qu'elles figurent aujourd'hui dans la mention spéciale de vos factures. La console les recopie telles quelles, puis ajoute elle-même les révisions suivantes et la date de la prochaine. Vide : elle indique seulement le loyer constaté à la reprise.</span></label>
   </div>
 </div>
 <div class="carte">

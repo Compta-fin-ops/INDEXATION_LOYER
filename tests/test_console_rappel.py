@@ -114,6 +114,8 @@ class _Pennylane:
             if self.perdre:
                 raise TimeoutError("réponse perdue")
             return _Reponse({"id": 555, "status": "draft", "draft": True}, 201)
+        if "/invoice_line" in url:                           # lignes et sections de l'abonnement : aucune
+            return _Reponse({"items": [], "has_more": False, "next_cursor": None})
         if "/billing_subscriptions" in url:
             return _Reponse({"items": [{"id": 700, "status": "in_progress", "mode": "awaiting_validation", "start": "2026-04-01",
                                         "finish": "2026-12-01", "next_occurrence": "2026-12-01", "prev_occurrence": None, "label": "Loyer",

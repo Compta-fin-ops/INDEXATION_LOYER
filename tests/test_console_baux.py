@@ -174,7 +174,7 @@ def test_facture_conforme_au_schema_officiel():
     n = pennylane_api.normaliser_facture(f)
     assert n == {"id": 42, "customer_id": 4242, "subscription_id": 700, "numero": "F20260011", "libelle": "Loyer 12 rue des Halles",
                  "date": "2026-11-01", "echeance": "2026-11-11", "montant_ht": 1150.0, "montant_ttc": 1380.0, "restant_du": 1380.0,
-                 "statut": "late"}
+                 "statut": "late", "reference": ""}
     hors = pennylane_api.normaliser_facture({**f, "customer": None, "billing_subscription": None, "remaining_amount_with_tax": None,
                                              "status": "credit_note"})
     assert hors["customer_id"] is None and hors["subscription_id"] is None and hors["restant_du"] == 0.0

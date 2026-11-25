@@ -103,24 +103,32 @@
   <h2>Abonnement proposé pour la période suivante</h2>
   <p class="petit" style="margin: 0">À partir du <span class="fort">{{ sit.proposition.debut | date_fr }}</span>{% if sit.proposition.occurrences %}, <span class="fort">{{ sit.proposition.occurrences }} occurrence(s)</span>, la dernière le {{ sit.proposition.derniere_occurrence | date_fr }}{% endif %}. {{ sit.proposition.note }}.
   {% if not sit.proposition.envoyable %}<span class="negatif">Client Pennylane manquant : non envoyable.</span>{% endif %}</p>
-  {% if sit.rappel and sit.rappel.echeances %}<p class="petit" style="margin: 8px 0 0"><span class="pastille a_traiter">Rappel de loyer</span> {{ sit.rappel.montant | eur2 }} HT à facturer séparément : {{ sit.rappel.echeances }} échéance(s) facturée(s) à l'ancien loyer depuis le {{ sit.rappel.depuis | date_fr }}, soit {{ sit.rappel.ecart_par_echeance | eur2 }} par échéance. <a href="/baux/{{ sit.bail.id }}/rappel">Préparer la facture de rappel en brouillon</a></p>{% endif %}
+  {% if sit.rappel and sit.rappel.echeances %}<p class="petit" style="margin: 8px 0 0"><span class="pastille a_traiter">Rappel de loyer</span> {{ sit.rappel.montant | eur2 }} HT à facturer séparément : {{ sit.rappel.echeances }} échéance(s) facturée(s) à l'ancien loyer depuis le {{ sit.rappel.depuis | date_fr }}, soit {{ sit.rappel.ecart_par_echeance | eur2 }} par échéance. {% if sit.rappel_facture %}<span class="pastille ok">Déjà créé</span> facture du {{ sit.rappel_facture.date | date_fr }}, {{ sit.rappel_facture.montant_ht | eur2 }} HT pour toutes les échéances jusqu'au terme de l'abonnement{{ ', en brouillon dans Pennylane' if sit.rappel_facture.statut == 'draft' }}.{% else %}<a href="/baux/{{ sit.bail.id }}/rappel">Préparer la facture de rappel en brouillon</a>{% endif %}</p>{% endif %}
   <pre>POST /api/external/v2/billing_subscriptions
 {{ corps }}</pre>
   <p style="margin: 12px 0 0"><a class="bouton" href="/baux/{{ sit.bail.id }}/abonnement">Préparer la création dans Pennylane</a>
   <span class="discret petit">Rien n'est envoyé à cette étape : la page suivante affiche les contrôles et demande une confirmation.</span></p>
 </div>
 {% endif %}
+{% if mention %}
+<div class="carte">
+  <h2>Mention portée sur les factures</h2>
+  <pre class="mention">{{ mention }}</pre>
+  <p class="discret petit" style="margin: 8px 0 0">Suivi des révisions tel que la console l'inscrit sur l'abonnement de la période et sur la facture de rappel, arrêté à ce jour.{% if sit.bail.reprise_date and not sit.bail.mention_historique %} Bail repris en cours : l'historique d'avant la reprise n'est pas connu de la console. Pour le faire figurer, <a href="/baux/{{ sit.bail.id }}/modifier">le saisir sur le bail</a>.{% endif %}</p>
+</div>
+{% endif %}
 <div class="carte">
   <h2>Dernières factures</h2>
+  <p class="discret petit" style="margin: -6px 0 12px">La colonne « Origine » dit à quoi correspond chaque facture : l'abonnement qui l'a générée, ou la révision dont elle est le rappel.</p>
   <div class="defile"><table>
-    <thead><tr><th>Date</th><th>Numéro</th><th>Échéance</th><th class="num">HT</th><th class="num">TTC</th><th class="num">Reste dû</th><th>Statut</th></tr></thead>
+    <thead><tr><th>Date</th><th>Numéro</th><th>Origine</th><th>Échéance</th><th class="num">HT</th><th class="num">TTC</th><th class="num">Reste dû</th><th>Statut</th></tr></thead>
     <tbody>
     {% for f in sit.factures[:12] %}
-    <tr><td>{{ f.date | date_fr }}</td><td>{{ f.numero or '—' }}</td><td>{{ f.echeance | date_fr }}</td>
+    <tr><td>{{ f.date | date_fr }}</td><td>{{ f.numero or '—' }}</td><td class="petit">{{ f.origine }}</td><td>{{ f.echeance | date_fr }}</td>
       <td class="num">{{ f.montant_ht | eur2 }}</td><td class="num">{{ f.montant_ttc | eur2 }}</td>
       <td class="num {{ 'negatif' if f.restant_du > 0 and f.statut == 'late' }}">{{ f.restant_du | eur2 }}</td>
       <td><span class="pastille {{ {'paid': 'ok', 'late': 'bloquant', 'draft': 'a_traiter'}.get(f.statut, 'neutre') }}">{{ {'paid': 'Payée', 'late': 'En retard', 'draft': 'Brouillon', 'upcoming': 'À échoir', 'cancelled': 'Annulée'}.get(f.statut, f.statut) }}</span></td></tr>
-    {% else %}<tr><td colspan="7" class="discret">Aucune facture.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="8" class="discret">Aucune facture.</td></tr>{% endfor %}
     </tbody>
   </table></div>
 </div>

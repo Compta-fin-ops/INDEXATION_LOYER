@@ -17,7 +17,11 @@
       <dt>Montant du rappel</dt><dd>{{ prop.montant_ht | eur2 }} HT</dd>
       <dt>Client Pennylane</dt><dd>{{ prop.corps.customer_id or '—' }}</dd>
       <dt>Référence</dt><dd>{{ prop.reference }}</dd>
+      <dt>Échéance de paiement</dt><dd>{{ prop.corps.deadline | date_fr }}</dd>
+      {% if prop.reprise %}<dt>Modèle</dt><dd>abonnement n° {{ prop.reprise.abonnement }} : conditions de paiement, modèle de facture{{ ', unité et TVA de la ligne de loyer' if prop.reprise.lignes }}</dd>{% endif %}
     </dl>
+    <p class="petit fort" style="margin: 12px 0 4px">Mention portée sur la facture</p>
+    <pre class="mention">{{ prop.corps.special_mention }}</pre>
     <p class="petit" style="margin: 12px 0 0"><span class="fort">Ce que la console ne fait pas :</span> elle ne finalise pas la facture, ne l'envoie pas, et ne modifie aucune facture existante. Le brouillon se relit, se corrige et se valide dans Pennylane ; il peut aussi y être supprimé.</p>
     {% else %}<p class="discret" style="margin: 0">Aucun rappel à facturer pour ce bail : il faut un abonnement en cours resté à l'ancien loyer après une révision.</p>{% endif %}
   </div>

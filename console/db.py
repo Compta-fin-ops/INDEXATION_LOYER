@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS baux (
     reprise_date TEXT,                       -- date de la dernière révision appliquée
     reprise_loyer_annuel REAL,               -- loyer annuel HT en vigueur à cette date
     reprise_trimestre TEXT,                  -- trimestre de l'indice appliqué à cette révision
+    mention_historique TEXT DEFAULT '',      -- historique antérieur à la reprise, reporté sur les factures
     UNIQUE (dossier, code)
 );
 CREATE TABLE IF NOT EXISTS decisions (             -- décision du bailleur sur une échéance de révision
@@ -105,6 +106,7 @@ CREATE TABLE IF NOT EXISTS abonnements (
     type_regle TEXT DEFAULT 'monthly',
     intervalle INTEGER DEFAULT 1,
     montant_ht REAL DEFAULT 0,               -- par occurrence
+    parametres TEXT DEFAULT '',              -- JSON : conditions, modèle, textes et lignes lus dans Pennylane
     PRIMARY KEY (dossier, id)
 );
 CREATE TABLE IF NOT EXISTS factures (
@@ -120,6 +122,7 @@ CREATE TABLE IF NOT EXISTS factures (
     montant_ttc REAL DEFAULT 0,
     restant_du REAL DEFAULT 0,
     statut TEXT DEFAULT '',                  -- draft, upcoming, late, paid, partially_paid, cancelled…
+    reference TEXT DEFAULT '',               -- external_reference : « console-… » pour une facture créée par la console
     PRIMARY KEY (dossier, id)
 );
 CREATE TABLE IF NOT EXISTS synchros (
@@ -149,7 +152,9 @@ CREATE TABLE IF NOT EXISTS envois (                 -- journal des créations d'
     reponse TEXT DEFAULT '',
     auteur TEXT DEFAULT '',
     nature TEXT DEFAULT 'abonnement',                -- abonnement | facture
-    facture_id INTEGER
+    facture_id INTEGER,
+    lot TEXT DEFAULT '',                             -- créations confirmées ensemble : même identifiant de lot
+    verification TEXT DEFAULT ''                     -- montant relu dans la réponse de Pennylane, comparé au montant envoyé
 );
 CREATE TABLE IF NOT EXISTS reglages (              -- réglages portés par la base elle-même
     cle TEXT PRIMARY KEY,
@@ -200,8 +205,12 @@ MIGRATIONS = {
              ("trimestre_base", "TEXT DEFAULT ''"), ("periodicite_revision_ans", "INTEGER DEFAULT 1"),
              ("methode", "TEXT DEFAULT 'Chaînée'"), ("plafond_annuel_pct", "REAL"), ("duree_ans", "INTEGER"),
              ("date_sortie", "TEXT"), ("notes", "TEXT DEFAULT ''"),
-             ("reprise_date", "TEXT"), ("reprise_loyer_annuel", "REAL"), ("reprise_trimestre", "TEXT")),
-    "envois": (("auteur", "TEXT DEFAULT ''"), ("nature", "TEXT DEFAULT 'abonnement'"), ("facture_id", "INTEGER")),
+             ("reprise_date", "TEXT"), ("reprise_loyer_annuel", "REAL"), ("reprise_trimestre", "TEXT"),
+             ("mention_historique", "TEXT DEFAULT ''")),
+    "envois": (("auteur", "TEXT DEFAULT ''"), ("nature", "TEXT DEFAULT 'abonnement'"), ("facture_id", "INTEGER"),
+               ("lot", "TEXT DEFAULT ''"), ("verification", "TEXT DEFAULT ''")),
+    "abonnements": (("parametres", "TEXT DEFAULT ''"),),
+    "factures": (("reference", "TEXT DEFAULT ''"),),
 }
 
 

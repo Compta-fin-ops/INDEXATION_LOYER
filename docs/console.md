@@ -221,6 +221,10 @@ par échéance est le plus proche.
 | Jeton cabinet | La doc indique qu'un jeton cabinet est accepté sur l'API v2 avec l'en-tête `X-Company-Id`. Non exploité : la console utilise un jeton par dossier |
 | Appel réel à Pennylane, en lecture | Exécuté le 24/11/2026 sur un environnement de test Pennylane : la liste des abonnements a été lue et rapprochée. La liste des factures a été appelée sans erreur ; son contenu n'a pas encore été observé |
 | Facture de rappel en brouillon | Corps conforme à l'OpenAPI « Create a customer invoice » fournie par le cabinet ; parcours testé contre un faux Pennylane, 5 tests |
+| Créations en lot, reprise des paramètres de l'abonnement existant, mention de suivi, chaînage des factures | Testés, 10 tests, dont trois contre un faux Pennylane ; parcours vérifié dans un navigateur sur une base de test |
+| Lecture des lignes et des sections d'un abonnement | Conforme aux OpenAPI « List invoice lines for a billing subscription » et « List the invoice line sections of a billing subscription » du 2026-05-27, fournies par le cabinet. **Jamais exécutée pour de vrai** |
+| Référence externe relue dans la liste des factures | Champ `external_reference` supposé présent dans la réponse de « List customer invoices » : le filtre sur ce champ est documenté, sa présence dans la réponse **reste à constater** |
+| Création d'une ligne portant à la fois un produit et un prix | Le schéma l'admet. **À constater sur un dossier d'essai** que Pennylane garde le prix envoyé : la console compare le montant de la réponse au montant envoyé et signale tout écart au journal |
 | Appel réel à Pennylane, en écriture | **Jamais exécuté** |
 
 Tout ce qui parle à Pennylane en lecture est isolé dans `console/pennylane_api.py`, fonctions
@@ -244,6 +248,66 @@ avoir, à établir à la main.
 
 Les verrous sont les mêmes pour les deux créations, décrits ci-dessous.
 
+### Ce qui est repris de l'abonnement existant
+
+La création ne réinvente rien de ce que l'abonnement en place porte déjà. À chaque collecte, la console lit
+les paramètres de l'abonnement en cours (à défaut du dernier terminé) et ses lignes de facture.
+
+| Élément | Nouvel abonnement | Facture de rappel |
+|---|---|---|
+| Conditions et mode de paiement | Repris | Conditions reprises : elles fixent l'échéance |
+| Modèle de facture, langue, devise, texte libre | Repris | Repris |
+| Libellé, objet, description | Repris | Propres au rappel |
+| Lignes | Recopiées à l'identique, produit compris ; seul le prix de la ligne de loyer change | Une ligne, avec l'unité, la TVA et le produit de la ligne de loyer |
+| Mention spéciale | Remplacée par le suivi des révisions | Phrase du rappel, puis suivi des révisions |
+| Mode des factures | Toujours brouillon, quoi que porte l'abonnement existant | Toujours brouillon |
+
+La ligne de loyer est reconnue ainsi : la ligne dont le montant est la provision sur charges du bail est la
+ligne de charges ; la plus forte des autres est le loyer ; toute autre ligne est recopiée telle quelle et
+signalée. Quand la console ne peut pas désigner la ligne de loyer avec certitude (lignes non lues, aucune
+ligne égale à la provision du bail, remise, quantité différente de 1), elle ne recopie pas les lignes : elle
+construit les siennes d'après le bail et l'écrit dans les contrôles. Une remise n'est jamais reconduite.
+
+### La mention de suivi des révisions
+
+Pour un bail calculé par la console, la mention portée sur les factures est produite par elle :
+
+```
+ILC 2019 T1 : 114,64
+Loyer de base : 1 160,00 € HT par mois
+Premier loyer : décembre 2019
+Révision au 01/12/2022 : ILC 2022 T1 : 120,61 contre 2019 T1 : 114,64, soit +5,21 % ; loyer porté à 1 220,41 € HT par mois.
+Prochaine ré-indexation triennale du loyer au 01/12/2025.
+```
+
+Les montants sont ceux d'une échéance. Une révision plafonnée, gelée ou en attente d'indice est dite comme
+telle. Au-delà de quatre révisions, les plus anciennes sont résumées par le loyer qu'elles ont donné. Pour un
+bail repris en cours, la console ne connaît pas les révisions d'avant la reprise : elle recopie le texte saisi
+dans le champ « Historique à reporter sur les factures » du bail, à défaut le loyer constaté à la reprise. La
+mention figure sur la page du bail et sur la page de confirmation, avant tout envoi. Comme un abonnement ne
+couvre qu'une période d'indexation, sa mention reste exacte pendant toute sa durée.
+
+### Le lien entre une facture Pennylane et un bail
+
+| Facture | Comment la console sait à quel bail elle appartient |
+|---|---|
+| Générée par un abonnement | Pennylane inscrit l'abonnement sur la facture ; l'abonnement est rattaché au bail |
+| Rappel créé par la console | Référence externe `console-DOSSIER-BAIL-rappel-DATE` inscrite sur la facture, et journal des envois |
+| Autre facture du client | Rattachée au client du bail, marquée « Hors abonnement » |
+
+Un abonnement se rattache à un bail dans cet ordre : créé par la console pour ce bail (journal des envois),
+identifiant inscrit sur le bail, client Pennylane du bail. Créer l'abonnement de la période suivante ne
+demande donc aucune modification du bail. La page du bail affiche l'origine de chaque facture.
+
+### Créer en lot
+
+La page « Créations en lot » liste tout ce que la console propose de créer, tous dossiers confondus, avec
+l'état de ses contrôles. Une ligne prête est cochée d'office, sauf si elle porte un avertissement. La
+confirmation consiste à saisir le nombre de lignes cochées. Chaque création passe ensuite par le même chemin
+qu'une création unitaire : contrôles rejoués, empreinte du corps, journal. Pennylane est relu une fois par
+dossier avant le lot et une fois après. Une ligne dont la situation a changé depuis l'affichage est écartée
+sans arrêter le lot ; le lot s'arrête à la première création que Pennylane ne confirme pas.
+
 ## Créer un abonnement depuis la console
 
 Règle de construction : **ne rien faire qui puisse mettre des données en danger.** Elle se traduit ainsi.
@@ -255,9 +319,10 @@ Règle de construction : **ne rien faire qui puisse mettre des données en dange
 | Jeton d'écriture distinct | Variable `<variable du dossier>_ECRITURE`. Le jeton de lecture ne sert jamais à écrire. |
 | Factures toujours en brouillon | Le mode `awaiting_validation` est imposé dans le code, réglable nulle part. Un corps portant un autre mode est refusé. |
 | Relecture de Pennylane juste avant l'envoi | Les contrôles portent sur l'état du moment, pas sur celui de la veille. |
-| Contrôles bloquants | Client identifié, début dans le futur, abonnement borné à une période, loyer de la période connu, aucun chevauchement, aucun envoi antérieur, montant cohérent à 15 % près avec l'abonnement précédent. |
+| Contrôles bloquants | Client identifié, début dans le futur, abonnement borné à une période d'indexation du bail (un, deux ou trois ans), loyer de la période connu, aucun chevauchement, aucun envoi antérieur, montant cohérent à 15 % près avec l'abonnement précédent. |
 | Ce qui est affiché est ce qui est envoyé | Empreinte du corps exact. Si la situation change entre l'affichage et la confirmation, l'envoi est refusé. |
-| Confirmation saisie à la main | Il faut taper le code du bail. Un bail à la fois, aucun envoi en lot. |
+| Confirmation saisie à la main | Création unitaire : taper le code du bail. Création en lot : taper le nombre de créations cochées. |
+| Montant relu | Le montant hors taxes de la réponse de Pennylane est comparé au montant envoyé ; un écart est écrit au journal. |
 | Journal écrit avant l'appel | Chaque tentative laisse une trace avec le corps exact, même si la réponse se perd. |
 | Réponse perdue | L'envoi est marqué « incertain » et tout nouvel essai pour ce bail est bloqué jusqu'à relecture de Pennylane. |
 
@@ -331,6 +396,12 @@ Internet demande un serveur placé derrière un accès chiffré. Il n'y a pas no
   loyer révisé à partir de l'échéance qui suit ; le prorata du mois de révision n'est pas calculé.
 - **Indice publié après la date anniversaire.** La console signale la révision échue sans indice et refuse de
   créer un abonnement à un loyer inconnu. La période provisoire à l'ancien loyer, puis le rappel, restent manuels.
+- **Plafond de hausse.** Le plafond saisi sur un bail est annuel et se compose sur les années couvertes par la
+  révision : 10 % par an laissent passer 33,1 % sur une révision triennale. Un plafond qui s'applique une fois par
+  révision, quelle que soit sa périodicité, n'est pas modélisé : un tel bail se suit par le point de reprise.
+- **Bornage d'un abonnement sans terme.** La console ne modifie pas un abonnement existant. Un abonnement repris
+  sans terme se borne une fois, à la main, dans Pennylane ; les suivants, créés par la console, sont bornés.
+- **Envoi d'une facture.** La console ne finalise ni n'envoie aucune facture : tout se valide dans Pennylane.
 - **Envoi du courrier.** Le PDF est produit par la console ; il n'est ni envoyé ni déposé dans Pennylane.
   L'API d'envoi par courriel de Pennylane porte sur les factures et les documents commerciaux, avec un modèle
   de courriel choisi dans Pennylane : elle n'envoie pas une lettre libre. Une facture expose une liste

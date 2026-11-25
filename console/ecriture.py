@@ -10,7 +10,10 @@ Règle de construction : ne rien faire qui puisse mettre des données en danger.
     distinct du jeton de lecture (nom du jeton de lecture suivi de _ECRITURE).
   - Un envoi n'a lieu que si TOUS les contrôles bloquants passent, sur des données relues à l'instant.
   - Chaque tentative est journalisée avant l'appel, avec le corps exact et son empreinte.
-  - Un bail à la fois, après confirmation saisie à la main. Aucun envoi en lot.
+  - Une création à la fois, ou plusieurs confirmées ensemble (page « Créations en lot ») : dans les deux cas
+    chaque création repasse seule tous ses contrôles, sur des données relues, et a sa ligne au journal.
+    Un lot s'arrête à la première création que Pennylane ne confirme pas.
+  - Ce que Pennylane renvoie est comparé à ce qui a été envoyé : un montant différent est signalé au journal.
   - Un seul point du code émet vers Pennylane : la fonction `_poster`, en POST.
 
 État de vérification : aucun appel réel d'écriture n'a été exécuté. Les schémas d'entrée sont ceux des
@@ -31,12 +34,12 @@ from datetime import date, datetime, timedelta
 
 from . import jetons, referentiel
 from .pennylane_api import BASE_V2
-from .rapprochement import INTERVALLE_MOIS, SituationBail, _d, _eur, _fr
+from .rapprochement import CODES_TVA, INTERVALLE_MOIS, SituationBail, _d, _eur, _fr
 
 MODE_IMPOSE = "awaiting_validation"
 VARIATION_MAX = 0.15              # écart toléré avec le montant de l'abonnement précédent
 FRAICHEUR_MAX = timedelta(hours=24)
-MOIS_MAX = 12                     # un abonnement ne couvre jamais plus d'une période annuelle
+MOIS_PAR_AN = 12                  # un abonnement ne couvre jamais plus d'une période d'indexation du bail : 1, 2 ou 3 ans
 
 
 @dataclass
@@ -101,9 +104,11 @@ def controler(sit: SituationBail, proposition: dict, dossier: dict, envois: list
     c.append(Controle("Début strictement postérieur à aujourd'hui", bool(debut and debut > aujourdhui),
                       f"Début le {_fr(debut)} : rien n'est généré avant cette date, ce qui laisse le temps de vérifier."))
     count = regle.get("count")
-    borne = isinstance(count, int) and 0 < count * pas <= MOIS_MAX
+    periode = int(bail.get("periodicite_revision_ans") or 1)      # révision annuelle, biennale ou triennale selon le bail
+    borne = isinstance(count, int) and 0 < count * pas <= MOIS_PAR_AN * periode
     c.append(Controle("Abonnement borné à une période d'indexation", borne,
-                      f"{count} occurrence(s), dernière le {_fr(_d(proposition.get('derniere_occurrence')))}" if count
+                      f"{count} occurrence(s), dernière le {_fr(_d(proposition.get('derniere_occurrence')))}"
+                      + ("" if borne else f" : plus que la période de {periode} an(s) entre deux révisions du bail.") if count
                       else "Aucun nombre d'occurrences : un abonnement sans terme est refusé."))
     c.append(Controle("Taux de TVA reconnu", proposition.get("tva_connue", True),
                       "Code Pennylane " + str(lignes[0].get("vat_rate")) + "." if lignes and proposition.get("tva_connue", True) else
@@ -150,7 +155,73 @@ def controler(sit: SituationBail, proposition: dict, dossier: dict, envois: list
     if (bail.get("statut_revision") or "").startswith("⚠"):
         c.append(Controle("Indice de la dernière révision publié", False,
                           "Indice attendu : le loyer facturé sera provisoire, un rappel sera dû.", bloquant=False))
+    return c + controles_reprise(proposition, bail)
+
+
+def controles_reprise(proposition: dict, bail: dict) -> list[Controle]:
+    """Ce que la création reprend de l'abonnement existant. Aucun de ces contrôles n'est bloquant : ils disent
+    au valideur ce qui a été recopié, et ce qui n'a pas pu l'être."""
+    r = proposition.get("reprise")
+    if not r:
+        return []
+    c = [Controle(f"Paramètres repris de l'abonnement n° {r['abonnement']}", True,
+                  " · ".join(x for x in (f"paiement {r['conditions']}" if r["conditions"] else "", r["paiement"],
+                                         f"modèle de facture n° {r['modele_facture']}" if r["modele_facture"] else "") if x)
+                  or "Aucun paramètre lu sur cet abonnement.", bloquant=False)]
+    if r["lignes"]:
+        c.append(Controle("Lignes recopiées, seul le loyer change", True, " ; ".join(
+            f"« {d['label']} » {_eur(d['ancien'])} → {_eur(d['nouveau'])}" if d["role"] == "loyer" else
+            f"« {d['label']} » {_eur(d['ancien'])}, inchangée" for d in r["detail"]), bloquant=False))
+        autres = [d for d in r["detail"] if d["role"] == "autre"]
+        if autres:
+            c.append(Controle("Aucune ligne étrangère au loyer et aux charges du bail", False,
+                              "Recopiée(s) telle(s) quelle(s) : " + ", ".join(f"« {d['label']} » {_eur(d['ancien'])}" for d in autres)
+                              + ". À retirer dans Pennylane si elle(s) ne doi(ven)t pas être reconduite(s).", bloquant=False))
+    elif r["motif"]:
+        c.append(Controle("Lignes de l'abonnement existant recopiées", False,
+                          f"Non : {r['motif']}. Les lignes sont celles que la console construit d'après le bail.", bloquant=False))
+    attendue = CODES_TVA.get(float(bail["tva_pct"])) if bail.get("tva_pct") is not None else None
+    if r["tva_loyer"] and attendue and r["tva_loyer"] != attendue:
+        c.append(Controle("TVA de la ligne de loyer conforme au bail", False,
+                          f"L'abonnement facture le loyer au code {r['tva_loyer']}, le bail prévoit {attendue}. "
+                          "La création reprend le code de l'abonnement : corriger l'un ou l'autre.", bloquant=False))
+    if r["prelevement"]:
+        c.append(Controle("Mode de paiement reconduit", True,
+                          f"{r['paiement'].capitalize()}, comme sur l'abonnement n° {r['abonnement']}.", bloquant=False))
+    if r.get("mention_remplacee"):
+        c.append(Controle("Mention de l'abonnement existant remplacée par le suivi des révisions", True,
+                          "Ancienne mention : " + r["mention_remplacee"].replace("\n", " / ")[:600], bloquant=False))
     return c
+
+
+def verifier_reponse(nature: str, corps: dict, reponse: dict | None) -> str:
+    """Compare le montant hors taxes que Pennylane dit avoir créé à celui du corps envoyé."""
+    lignes = corps.get("invoice_lines") or corps.get("customer_invoice_data", {}).get("invoice_lines") or []
+    envoye = round(sum(float(l["raw_currency_unit_price"]) * float(l.get("quantity", 1)) for l in lignes), 2)
+    donnees = (reponse or {}) if nature == "facture" else (reponse or {}).get("customer_invoice_data") or {}
+    try:
+        relu = round(float(donnees.get("currency_amount_before_tax")), 2)
+    except (TypeError, ValueError):
+        return "Montant non relu : la réponse de Pennylane ne le porte pas. À contrôler dans Pennylane."
+    if abs(relu - envoye) <= 0.01:
+        return f"Conforme : Pennylane a créé {_eur(relu)} hors taxes, montant envoyé."
+    return f"ÉCART : Pennylane a créé {_eur(relu)} hors taxes pour {_eur(envoye)} envoyés. À corriger dans Pennylane avant de valider."
+
+
+def parametres_du_corps(corps: dict) -> dict:
+    """Paramètres d'un abonnement tel qu'il vient d'être créé, au format de la collecte : en simulation,
+    l'abonnement créé sert à son tour de modèle à la période suivante, comme dans Pennylane."""
+    d = corps.get("customer_invoice_data", {})
+    return {"conditions": corps.get("payment_conditions", ""), "paiement": corps.get("payment_method", ""),
+            "devise": d.get("currency", ""), "langue": d.get("language", ""), "modele": d.get("customer_invoice_template_id"),
+            "objet": d.get("pdf_invoice_subject", ""), "texte_libre": d.get("pdf_invoice_free_text", ""),
+            "description": d.get("pdf_description", ""), "mention": d.get("special_mention", ""), "remise": None,
+            "sections": d.get("invoice_line_sections", []),
+            "lignes": [{"label": l["label"], "unit": l.get("unit", ""), "quantite": float(l.get("quantity", 1)),
+                        "prix": l["raw_currency_unit_price"], "tva": l.get("vat_rate", ""), "description": l.get("description", ""),
+                        "produit": l.get("product_id"), "section": l.get("section_rank"), "remise": l.get("discount"),
+                        "montant_ht": round(float(l["raw_currency_unit_price"]) * float(l.get("quantity", 1)), 2)}
+                       for l in d.get("invoice_lines", [])]}
 
 
 def envoi_possible(controles: list[Controle]) -> bool:
@@ -160,27 +231,29 @@ def envoi_possible(controles: list[Controle]) -> bool:
 # ---------------------------------------------------------------------------
 # Journal des envois
 # ---------------------------------------------------------------------------
-def journal(cx: sqlite3.Connection, dossier: str | None = None) -> list[dict]:
-    filtre, args = ("WHERE dossier=?", (dossier,)) if dossier else ("", ())
+def journal(cx: sqlite3.Connection, dossier: str | None = None, lot: str = "") -> list[dict]:
+    filtre, args = ("WHERE dossier=?", (dossier,)) if dossier else ("WHERE lot=?", (lot,)) if lot else ("", ())
     return [dict(r) for r in cx.execute(f"SELECT * FROM envois {filtre} ORDER BY id DESC", args)]
 
 
-def ouvrir_envoi(cx: sqlite3.Connection, bail: dict, proposition: dict, corps: dict, mode: str, nature: str = "abonnement") -> int:
+def ouvrir_envoi(cx: sqlite3.Connection, bail: dict, proposition: dict, corps: dict, mode: str, nature: str = "abonnement",
+                 lot: str = "") -> int:
     """Journalise la tentative AVANT l'appel : un envoi dont la réponse se perd laisse une trace."""
-    cur = cx.execute("""INSERT INTO envois (horodatage, dossier, bail_id, bail_code, locataire, cle, empreinte, corps, mode, etat, auteur, nature)
-                        VALUES (?,?,?,?,?,?,?,?,?, 'en cours', ?, ?)""",
+    cur = cx.execute("""INSERT INTO envois (horodatage, dossier, bail_id, bail_code, locataire, cle, empreinte, corps, mode, etat, auteur,
+                        nature, lot) VALUES (?,?,?,?,?,?,?,?,?, 'en cours', ?, ?, ?)""",
                      (datetime.now().isoformat(timespec="seconds"), bail["dossier"], bail["id"], bail["code"],
                       bail.get("locataire", ""), cle_idempotence(bail["dossier"], bail["code"], proposition["debut"]),
-                      empreinte(corps), json.dumps(corps, ensure_ascii=False, indent=2), mode, referentiel.utilisateur(), nature))
+                      empreinte(corps), json.dumps(corps, ensure_ascii=False, indent=2), mode, referentiel.utilisateur(), nature, lot))
     cx.commit()
     return cur.lastrowid
 
 
 def clore_envoi(cx: sqlite3.Connection, envoi_id: int, etat: str, statut_http: int | None = None,
                 subscription_id: int | None = None, statut_abonnement: str = "", reponse: str = "",
-                facture_id: int | None = None) -> None:
-    cx.execute("UPDATE envois SET etat=?, statut_http=?, subscription_id=?, statut_abonnement=?, reponse=?, facture_id=? WHERE id=?",
-               (etat, statut_http, subscription_id, statut_abonnement, reponse[:4000], facture_id, envoi_id))
+                facture_id: int | None = None, verification: str = "") -> None:
+    cx.execute("""UPDATE envois SET etat=?, statut_http=?, subscription_id=?, statut_abonnement=?, reponse=?, facture_id=?,
+                  verification=? WHERE id=?""",
+               (etat, statut_http, subscription_id, statut_abonnement, reponse[:4000], facture_id, verification, envoi_id))
     cx.commit()
 
 
@@ -277,4 +350,4 @@ def controler_rappel(sit: SituationBail, proposition: dict | None, dossier: dict
                       "Envoi n° " + ", ".join(str(e["id"]) for e in deja) + " déjà journalisé"
                       + (" : issue incertaine, vérifier dans Pennylane." if any(e["etat"] != "créé" for e in deja) else ".")
                       if deja else "Le journal ne contient aucun rappel pour cette révision."))
-    return c
+    return c + controles_reprise(proposition, bail)

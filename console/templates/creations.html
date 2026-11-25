@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block titre %}Créations en lot · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="fil"><a href="/">Tableau de bord</a> / Créations en lot</div>
+<h1>Créations en lot</h1>
+<p class="sous-titre">Tout ce que la console propose de créer dans Pennylane, tous dossiers confondus : abonnements de la période suivante et factures de rappel. Rien n'est modifié ni supprimé, tout naît en brouillon.</p>
+{% if erreur %}<div class="bandeau erreur">{{ erreur }}</div>{% endif %}
+{% if resultats is not none %}
+<div class="carte">
+  <h2>Résultat du lot {{ lot }}</h2>
+  <div class="defile"><table>
+    <thead><tr><th>Dossier</th><th>Bail</th><th>Nature</th><th>Issue</th><th>Détail</th></tr></thead>
+    <tbody>
+    {% for r in resultats %}
+    <tr><td>{{ r.bail.dossier }}</td><td><a class="fort" href="/baux/{{ r.bail.id }}">{{ r.bail.code }}</a> {{ r.bail.locataire }}</td>
+      <td>{{ 'Facture de rappel' if r.nature == 'facture' else 'Abonnement' }}</td>
+      <td><span class="pastille {{ {'créé': 'ok', 'refusé': 'a_traiter', 'incertain': 'bloquant'}.get(r.etat, 'neutre') }}">{{ r.etat | capitalize }}</span></td>
+      <td class="petit">{% if r.envoi %}<a href="/envois/{{ r.envoi }}">envoi n° {{ r.envoi }}</a>{% endif %}{% if r.erreur %} {{ r.erreur }}{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="petit" style="margin: 12px 0 0"><a href="/envois?lot={{ lot }}">Journal de ce lot</a>. À faire dans Pennylane : relire chaque brouillon créé, puis le valider.</p>
+</div>
+{% endif %}
+<form method="post" action="/creations">
+<div class="carte">
+  <h2>{{ nb_prets }} création(s) prête(s) sur {{ lignes | length }} proposée(s)</h2>
+  <div class="defile"><table>
+    <thead><tr><th></th><th>Dossier</th><th>Bail</th><th>Nature</th><th>Période</th><th class="num">Montant HT</th><th>État</th></tr></thead>
+    <tbody>
+    {% for l in lignes %}
+    <tr class="{{ 'a-venir' if not l.pret }}">
+      <td>{% if l.pret %}<input type="checkbox" name="choix" value="{{ l.cle }}" aria-label="Créer"{{ ' checked' if not l.avertissements }}>{% endif %}</td>
+      <td><a href="/dossiers/{{ l.dossier.code }}">{{ l.dossier.nom }}</a></td>
+      <td><a class="fort" href="/baux/{{ l.bail.id }}">{{ l.bail.code }}</a> {{ l.bail.locataire }}</td>
+      <td>{% if l.nature == 'facture' %}<a href="/baux/{{ l.bail.id }}/rappel">Facture de rappel</a>{% else %}<a href="/baux/{{ l.bail.id }}/abonnement">Abonnement</a>{% endif %}{% if l.simule %} <span class="pastille neutre">simulé</span>{% endif %}</td>
+      <td class="petit">{{ l.periode }}</td>
+      <td class="num">{{ l.montant | eur2 }}{% if l.nature == 'abonnement' %}<div class="discret petit">par occurrence</div>{% endif %}</td>
+      <td class="petit">{% if l.pret %}<span class="pastille ok">Prête</span>{% else %}<span class="pastille bloquant">Bloquée</span>{% endif %}
+        {% for c in l.bloquants %}<div class="negatif">{{ c.libelle }}{% if c.detail %} : {{ c.detail }}{% endif %}</div>{% endfor %}
+        {% for c in l.avertissements %}<div class="discret">! {{ c.libelle }}{% if c.detail %} : {{ c.detail }}{% endif %}</div>{% endfor %}</td>
+    </tr>
+    {% else %}<tr><td colspan="7" class="discret">Rien à créer : aucun abonnement à renouveler, aucun rappel à facturer.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  <p class="discret petit" style="margin: 10px 0 0">Une ligne prête est cochée d'office, sauf si elle porte un avertissement : celle-là se coche à la main, après lecture. Le détail et le corps exact de chaque création se lisent en cliquant sur sa nature. Une ligne bloquée ne peut pas être cochée.</p>
+</div>
+{% if nb_prets %}
+<div class="carte">
+  <h2>Confirmation</h2>
+  <div class="confirmation">
+    <label><span>Pour confirmer, saisir le nombre de créations cochées<span id="compte" class="fort"></span></span>
+      <input type="text" name="confirmation" autocomplete="off" inputmode="numeric" required></label>
+    <button type="submit" class="principal">Créer les brouillons cochés</button>
+  </div>
+  <p class="discret petit" style="margin: 10px 0 0">Chaque création repasse seule tous ses contrôles au moment de l'envoi, sur un état de Pennylane relu à l'instant, et a sa ligne au journal. Le lot s'arrête à la première création que Pennylane ne confirme pas. Une création dont la situation a changé depuis l'affichage est écartée, les autres continuent.</p>
+</div>
+<script>
+(function () {
+  var cases = document.querySelectorAll('input[name="choix"]'), compte = document.getElementById('compte');
+  function maj() { var n = 0; cases.forEach(function (c) { if (c.checked) n++; }); compte.textContent = ' : ' + n; }
+  cases.forEach(function (c) { c.addEventListener('change', maj); }); maj();
+})();
+</script>
+{% endif %}
+</form>
+{% endblock %}

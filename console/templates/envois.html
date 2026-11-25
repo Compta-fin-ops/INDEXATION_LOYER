@@ -3,6 +3,7 @@
 {% block contenu %}
 <h1>Journal des envois</h1>
 <p class="sous-titre">Chaque tentative de création d'un abonnement ou d'une facture de rappel, réussie ou non, avec le corps exact envoyé. Le journal n'est jamais purgé.</p>
+{% if lot %}<div class="bandeau">Lot {{ lot }} seulement. <a href="/envois">Tout le journal</a></div>{% endif %}
 <div class="carte"><div class="defile"><table>
   <thead><tr><th>N°</th><th>Date</th><th>Dossier</th><th>Bail</th><th>Période</th><th>Canal</th><th>Issue</th><th>Objet créé</th><th>Par</th></tr></thead>
   <tbody>

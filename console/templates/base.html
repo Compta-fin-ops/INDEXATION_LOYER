@@ -15,6 +15,7 @@
     <a href="/ecarts" class="{{ 'actif' if page == 'ecarts' }}">Écarts</a>
     <a href="/echeancier" class="{{ 'actif' if page == 'echeancier' }}">Échéancier</a>
     <a href="/indices" class="{{ 'actif' if page == 'indices' }}">Indices</a>
+    <a href="/creations" class="{{ 'actif' if page == 'creations' }}">Créations en lot</a>
     <a href="/envois" class="{{ 'actif' if page == 'envois' }}">Journal des envois</a>
     {% if utilisateur.role == 'administrateur' %}<a href="/utilisateurs" class="{{ 'actif' if page == 'utilisateurs' }}">Comptes</a>{% endif %}
   </nav>
@@ -28,7 +29,7 @@
 <main>
 {% if simule and utilisateur %}<div class="bandeau">Données simulées : portefeuille fictif de démonstration, aucun appel à Pennylane.</div>{% endif %}
 {% block contenu %}{% endblock %}
-<footer>Console des loyers v{{ version }} · {% if environnement == 'production' %}base de production · {% endif %}{% if environnement == 'test' %}base de test : aucune écriture vers Pennylane, les créations d'abonnement sont simulées{% elif simule %}mode simulation, aucun appel à Pennylane{% elif ecriture_activee %}écriture activée sur ce poste : création d'abonnements uniquement, factures en brouillon{% else %}lecture seule de Pennylane{% endif %} · la console ne modifie ni ne supprime jamais rien.</footer>
+<footer>Console des loyers v{{ version }} · {% if environnement == 'production' %}base de production · {% endif %}{% if environnement == 'test' %}base de test : aucune écriture vers Pennylane, les créations d'abonnement sont simulées{% elif simule %}mode simulation, aucun appel à Pennylane{% elif ecriture_activee %}écriture activée sur ce poste : création d'abonnements et de factures en brouillon uniquement{% else %}lecture seule de Pennylane{% endif %} · la console ne modifie ni ne supprime jamais rien.</footer>
 </main>
 </body>
 </html>

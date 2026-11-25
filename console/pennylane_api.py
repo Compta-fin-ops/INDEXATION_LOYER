@@ -9,8 +9,10 @@ Deux sources interchangeables derrière la même interface :
     next_cursor, limite de 100, champs et valeurs nulles), conforme ;
   - factures : « List customer invoices » (mêmes règles de pagination, champs lus ci-dessous,
     filtre sur la date), conforme. La liste contient aussi les avoirs, les proformas et les devis :
-    ils sont collectés avec leur statut et écartés du rapprochement.
-Reste inconnu : le signe des montants d'un avoir. Aucun appel réel n'a encore été exécuté.
+    ils sont collectés avec leur statut et écartés du rapprochement ;
+  - lignes et sections d'un abonnement : « List invoice lines for a billing subscription » et
+    « List the invoice line sections of a billing subscription », conformes, jamais exécutées.
+Reste inconnu : le signe des montants d'un avoir.
 """
 from __future__ import annotations
 
@@ -53,10 +55,39 @@ def _nombre(v) -> float:
         return 0.0
 
 
+def _remise(r) -> dict | None:
+    """Remise d'un abonnement ou d'une ligne, seulement si elle n'est pas nulle."""
+    if not isinstance(r, dict) or _nombre(r.get("value")) == 0:
+        return None
+    return {"type": r.get("type") or "absolute", "value": str(r["value"])}
+
+
+def normaliser_ligne(l: dict) -> dict:
+    """Ligne de « List invoice lines for a billing subscription ». Quantité et prix sont des chaînes ;
+    `unit`, `product`, `section_rank` peuvent être nuls."""
+    return {"label": l.get("label") or "", "unit": l.get("unit") or "", "quantite": _nombre(l.get("quantity")) or 1.0,
+            "prix": str(l.get("raw_currency_unit_price") or "0"), "tva": l.get("vat_rate") or "",
+            "description": l.get("description") or "", "produit": _premier(l, "product.id"),
+            "section": l.get("section_rank"), "remise": _remise(l.get("discount")),
+            "montant_ht": _nombre(l.get("currency_amount_before_tax"))}
+
+
+def parametres_abonnement(a: dict) -> dict:
+    """Ce qu'un nouvel abonnement ou une facture peut reprendre de celui-ci. Les lignes se lisent à part."""
+    donnees = a.get("customer_invoice_data") or {}
+    return {"conditions": a.get("payment_conditions") or "", "paiement": a.get("payment_method") or "",
+            "devise": donnees.get("currency") or "", "langue": donnees.get("language") or "",
+            "modele": _premier(donnees, "customer_invoice_template.id"),
+            "objet": donnees.get("pdf_invoice_subject") or "", "texte_libre": donnees.get("pdf_invoice_free_text") or "",
+            "description": donnees.get("pdf_description") or "", "mention": donnees.get("special_mention") or "",
+            "remise": _remise(donnees.get("discount")), "lignes": None, "sections": []}
+
+
 def normaliser_abonnement(a: dict) -> dict:
     regle = a.get("recurring_rule") or {}
     donnees = a.get("customer_invoice_data") or {}
     return {
+        "parametres": parametres_abonnement(a),
         "id": int(a["id"]),
         "customer_id": _premier(a, "customer.id", "customer_id"),
         "label": a.get("label") or donnees.get("label") or donnees.get("pdf_invoice_subject") or "",
@@ -87,6 +118,7 @@ def normaliser_facture(f: dict) -> dict:
         "montant_ttc": _nombre(f.get("currency_amount")),
         "restant_du": 0.0 if f.get("paid") else _nombre(f.get("remaining_amount_with_tax")),
         "statut": f.get("status") or ("draft" if f.get("draft") else ""),
+        "reference": f.get("external_reference") or "",
     }
 
 
@@ -102,6 +134,19 @@ def marques_sandbox(corps, chemin: str = "") -> list[str]:
     elif isinstance(corps, str) and corps.strip().lower().startswith("sandbox"):
         trouvees.append(f"{chemin} = {corps}")
     return trouvees
+
+
+def a_detailler(abos: list[dict]) -> list[dict]:
+    """Abonnements dont on lit les lignes : ceux qui ne sont pas terminés, et le dernier terminé de chaque client.
+    Ce sont les seuls dont la console reprend les paramètres ; les autres ne coûtent aucun appel."""
+    retenus = [a for a in abos if a.get("statut") not in ("finished", "stopped")]
+    derniers: dict = {}
+    for a in abos:
+        if a.get("statut") in ("finished", "stopped"):
+            d = derniers.get(a.get("customer_id"))
+            if d is None or (a.get("fin") or "") > (d.get("fin") or ""):
+                derniers[a.get("customer_id")] = a
+    return retenus + list(derniers.values())
 
 
 class ClientReel:
@@ -121,12 +166,14 @@ class ClientReel:
             raise RuntimeError(f"Dossier {dossier} : aucun jeton Pennylane enregistré pour ce dossier sur ce poste")
         return jeton
 
-    def _pages(self, dossier: str, chemin: str, filtre: list[dict] | None = None) -> Iterator[dict]:
+    def _pages(self, dossier: str, chemin: str, filtre: list[dict] | None = None, tri: str = "") -> Iterator[dict]:
         """Parcourt une liste paginée. Gère la pagination par curseur (items, has_more,
         next_cursor) et, à défaut, par numéro de page (total_pages, current_page)."""
         fixes: dict[str, Any] = {"limit": 100}
         if filtre:
             fixes["filter"] = json.dumps(filtre)
+        if tri:
+            fixes["sort"] = tri
         params = dict(fixes)
         while True:
             url = f"{self.base_url}{chemin}?{urllib.parse.urlencode(params)}"
@@ -228,7 +275,22 @@ class ClientReel:
         return sortie, False
 
     def abonnements(self, dossier: str) -> list[dict]:
-        return [normaliser_abonnement(a) for a in self._pages(dossier, "/billing_subscriptions")]
+        """Abonnements du dossier. Les lignes de facture ne sont pas dans la liste : elles se lisent abonnement
+        par abonnement, et seulement pour ceux qui peuvent servir de modèle (voir `a_detailler`)."""
+        abos = [normaliser_abonnement(a) for a in self._pages(dossier, "/billing_subscriptions")]
+        for a in a_detailler(abos):
+            p = a["parametres"]
+            try:                                         # tri croissant : l'ordre des lignes de la facture
+                p["lignes"] = [normaliser_ligne(l) for l in self._pages(
+                    dossier, f"/billing_subscriptions/{a['id']}/invoice_lines", tri="id")]
+                if any(l["section"] is not None for l in p["lignes"]):
+                    p["sections"] = [{"title": s.get("title") or "", "description": s.get("description") or "", "rank": s.get("rank")}
+                                     for s in self._pages(dossier, f"/billing_subscriptions/{a['id']}/invoice_line_sections", tri="id")]
+            except RuntimeError as exc:                  # les lignes manquent : l'abonnement reste lu, sans modèle de lignes
+                log.warning("Lignes de l'abonnement %s illisibles : %s", a["id"], exc)
+                p["lignes"], p["erreur_lignes"] = None, str(exc)
+            time.sleep(PAUSE_ENTRE_APPELS)
+        return abos
 
     def factures(self, dossier: str) -> list[dict]:
         aujourdhui = date.today()

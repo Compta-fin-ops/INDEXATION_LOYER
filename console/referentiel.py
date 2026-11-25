@@ -20,14 +20,14 @@ from indexation_loyer import calcul, insee
 from indexation_loyer.baux import DECISIONS, INDICES, METHODES, PERIODICITES_FACTURATION, TYPES_BAIL, Bail
 from indexation_loyer.periodes import Trimestre
 
-from .rapprochement import CODES_TVA
+from .rapprochement import CODES_TVA, ECHEANCES_PAR_AN, UNITE
 
 NATURES_PIECE = ("Bail", "Avenant", "Courrier", "État des lieux", "Autre")
 # paramètres saisis d'un bail (hors identifiants techniques et champs calculés)
 CHAMPS_BAIL = ("code", "local", "locataire", "adresse_locataire", "type_bail", "date_effet", "duree_ans", "date_fin",
                "date_sortie", "loyer_initial_annuel", "charges_annuelles", "tva_pct", "periodicite", "indice",
                "trimestre_base", "periodicite_revision_ans", "methode", "plafond_annuel_pct", "customer_id",
-               "subscription_id", "notes", "reprise_date", "reprise_loyer_annuel", "reprise_trimestre")
+               "subscription_id", "notes", "reprise_date", "reprise_loyer_annuel", "reprise_trimestre", "mention_historique")
 CHAMPS_CALENDRIER = ("date_effet", "periodicite_revision_ans", "reprise_date")   # ils fixent la numérotation des révisions
 CHAMPS_CALCULES = ("loyer_attendu_annuel", "date_derniere_revision", "date_prochaine_revision", "loyer_prochain_annuel",
                    "date_revision_suivante", "statut_revision", "loyer_precedent_annuel")
@@ -41,7 +41,11 @@ LIBELLES = {
     "subscription_id": "Abonnement Pennylane", "notes": "Notes",
     "reprise_date": "Reprise : date de la dernière révision", "reprise_loyer_annuel": "Reprise : loyer annuel HT à cette date",
     "reprise_trimestre": "Reprise : trimestre de l'indice appliqué",
+    "mention_historique": "Historique à reporter sur les factures",
 }
+MOIS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
+FREQUENCE = {1: "annuelle", 2: "biennale", 3: "triennale"}
+LONGUEUR_HISTORIQUE = 1500
 
 _cache_indices: dict = {}
 
@@ -124,7 +128,64 @@ def deriver(ligne: dict, indices: dict, decisions: dict[int, str], aujourdhui: d
         "statut_revision": echues[-1].statut if echues else calcul.STATUT_A_VENIR,
         "trimestre_attendu": next((l.echeance.trimestre_reference for l in lignes
                                    if l.indice_reference is None and l.statut != calcul.STATUT_GELEE), None),
+        "suivi": suivi_revisions(ligne, indices, lignes),
     }
+
+
+def _euros(x: float) -> str:
+    return f"{x:,.2f} €".replace(",", " ").replace(".", ",")
+
+
+def _indice(v: float) -> str:
+    return f"{v:.2f}".replace(".", ",")
+
+
+def suivi_revisions(ligne: dict, indices: dict, lignes: list[calcul.LigneRevision]) -> dict:
+    """Matière de la mention portée sur les factures : d'où vient le loyer, révision par révision.
+
+    Les montants sont ceux d'une échéance (le loyer annuel divisé par le nombre d'échéances), comme sur la facture.
+    `entete` : indice et loyer de départ ; `revisions` : une phrase par révision, datée, passée ou à venir.
+    Bail repris en cours : la console ne connaît pas les révisions d'avant la reprise. Elle reporte le texte saisi
+    sur le bail (`mention_historique`), à défaut le loyer constaté à la reprise."""
+    n = ECHEANCES_PAR_AN.get(ligne.get("periodicite"), 12)
+    unite = UNITE.get(ligne.get("periodicite"), "mois")
+    nom = ligne.get("indice") or "ILC"
+    par = lambda annuel: f"{_euros(annuel / n)} HT par {unite}"
+    tri = lambda t: (t or "").replace("-", " ")
+    entete = []
+    base = indices.get((nom, ligne.get("trimestre_base")))
+    if ligne.get("trimestre_base"):
+        entete.append(f"{nom} {tri(ligne['trimestre_base'])}" + (f" : {_indice(base)}" if base is not None else ""))
+    entete.append(f"Loyer de base : {par(float(ligne.get('loyer_initial_annuel') or 0))}")
+    effet = _d(ligne.get("date_effet"))
+    if effet:
+        entete.append(f"Premier loyer : {MOIS[effet.month - 1]} {effet.year}")
+    if ligne.get("reprise_date"):
+        historique = (ligne.get("mention_historique") or "").strip()
+        entete += [x.strip() for x in historique.splitlines() if x.strip()] if historique else [
+            f"Loyer au {_aff(str(ligne['reprise_date'])[:10])} : {par(float(ligne.get('reprise_loyer_annuel') or 0))} "
+            f"({nom} {tri(ligne.get('reprise_trimestre'))})."]
+    revisions = []
+    for l in lignes:
+        quand = _aff(l.echeance.date_revision.isoformat())
+        rapport = (f"{nom} {tri(l.echeance.trimestre_reference)} : {_indice(l.indice_reference)} contre "
+                   f"{tri(l.trimestre_precedent_effectif)} : {_indice(l.indice_precedent)}"
+                   if l.indice_reference is not None and l.indice_precedent is not None else "")
+        variation = f"{(l.coefficient - 1) * 100:+.2f} %".replace(".", ",") if l.coefficient is not None else ""
+        if l.statut == calcul.STATUT_GELEE:
+            texte = f"Révision au {quand} : non appliquée, loyer maintenu à {par(l.loyer_retenu)}." if l.loyer_retenu is not None else ""
+        elif l.loyer_retenu is None:
+            texte = f"Révision au {quand} : {nom} {tri(l.echeance.trimestre_reference)} non encore publié, loyer provisoire."
+        elif l.loyer_brut is not None and l.loyer_retenu < l.loyer_brut:
+            plafond = f"{ligne.get('plafond_annuel_pct'):g}".replace(".", ",")
+            texte = (f"Révision au {quand} : variation de l'indice de {variation} ({rapport}), limitée par le plafond "
+                     f"du bail de {plafond} % par an, soit {par(l.loyer_retenu)}.")
+        else:
+            texte = f"Révision au {quand} : {rapport}, soit {variation} ; loyer porté à {par(l.loyer_retenu)}."
+        revisions.append({"date": l.echeance.date_revision.isoformat(), "texte": texte,
+                          "loyer": par(l.loyer_retenu) if l.loyer_retenu is not None else ""})
+    return {"entete": entete, "revisions": revisions,
+            "frequence": FREQUENCE.get(int(ligne.get("periodicite_revision_ans") or 1), "")}
 
 
 def decisions_du_bail(cx: sqlite3.Connection, bail_id: int) -> dict[int, dict]:
@@ -176,7 +237,10 @@ def valider(champs: dict[str, str]) -> tuple[dict, list[str]]:
     e: list[str] = []
     t = lambda nom: (champs.get(nom) or "").strip()
     v: dict = {"code": t("code").upper(), "local": t("local"), "locataire": t("locataire"),
-               "adresse_locataire": t("adresse_locataire"), "notes": t("notes")}
+               "adresse_locataire": t("adresse_locataire"), "notes": t("notes"),
+               "mention_historique": "\n".join(x.strip() for x in t("mention_historique").splitlines() if x.strip())}
+    if len(v["mention_historique"]) > LONGUEUR_HISTORIQUE:
+        e.append(f"Historique à reporter sur les factures : {LONGUEUR_HISTORIQUE} caractères au plus.")
     for nom in ("code", "local", "locataire"):
         if not v[nom]:
             e.append(f"{LIBELLES[nom]} : champ obligatoire.")

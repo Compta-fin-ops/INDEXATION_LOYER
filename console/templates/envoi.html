@@ -4,7 +4,7 @@
 <div class="fil"><a href="/envois">Journal des envois</a> / n° {{ e.id }}</div>
 <h1>Envoi n° {{ e.id }} <span class="pastille {{ {'créé': 'ok', 'refusé': 'a_traiter', 'incertain': 'bloquant'}.get(e.etat, 'neutre') }}">{{ e.etat | capitalize }}</span></h1>
 <p class="sous-titre">{{ nom }} · bail <a href="/baux/{{ e.bail_id }}">{{ e.bail_code }}</a> · {{ e.locataire }}{% if e.auteur %} · envoi déclenché par {{ e.auteur }}{% endif %}</p>
-{% if e.etat == 'incertain' %}<div class="bandeau erreur">Issue incertaine : Pennylane n'a pas confirmé. L'abonnement a pu être créé. Vérifier dans Pennylane, puis actualiser la console : tout nouvel envoi pour ce bail est bloqué d'ici là.</div>{% endif %}
+{% if e.etat == 'incertain' %}<div class="bandeau erreur">Issue incertaine : Pennylane n'a pas confirmé. L'objet a pu être créé. Vérifier dans Pennylane, puis actualiser la console : tout nouvel envoi pour ce bail est bloqué d'ici là.</div>{% endif %}
 {% if e.etat == 'refusé' %}<div class="bandeau">Envoi refusé : rien n'a été créé.</div>{% endif %}
 <div class="deux">
   <div class="carte">
@@ -15,6 +15,8 @@
       <dt>Réponse HTTP</dt><dd>{{ e.statut_http or '—' }}</dd>
       <dt>{{ 'Facture créée' if e.nature == 'facture' else 'Abonnement créé' }}</dt><dd>{% if e.nature == 'facture' %}{{ 'n° ' ~ e.facture_id if e.facture_id else '—' }}{% else %}{{ 'n° ' ~ e.subscription_id if e.subscription_id else '—' }}{% endif %}</dd>
       <dt>Statut à la création</dt><dd>{{ STATUTS.get(e.statut_abonnement, e.statut_abonnement) or '—' }}</dd>
+      {% if e.verification %}<dt>Montant relu</dt><dd class="{{ 'negatif' if e.verification.startswith('ÉCART') }}">{{ e.verification }}</dd>{% endif %}
+      {% if e.lot %}<dt>Lot</dt><dd><a href="/envois?lot={{ e.lot }}">{{ e.lot }}</a></dd>{% endif %}
       <dt>Clé d'unicité</dt><dd>{{ e.cle }}</dd>
       <dt>Empreinte du corps</dt><dd>{{ e.empreinte[:16] }}…</dd>
     </dl>
