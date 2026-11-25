@@ -387,7 +387,7 @@ def releve_compte(societe: dict, bail: dict, compte: dict, lignes: list[dict], d
     corps.append([Paragraph("<b>Total</b>", c), "", "", "", Paragraph(f"<b>{_eur(round(sum(l['debit'] for l in lignes), 2))}</b>", cd),
                   Paragraph(f"<b>{_eur(round(sum(l['credit'] for l in lignes), 2))}</b>", cd), Paragraph(f"<b>{_eur(solde)}</b>", cd)])
     el += [_tableau([Paragraph(f"<b>{t}</b>", c) for t in ("Date", "Journal", "Libellé", "Lettrage", "Débit", "Crédit", "Solde")],
-                    corps, [19, 14, 60, 18, 22, 22, 22]), Spacer(1, 4 * mm),
+                    corps, [22, 16, 50, 20, 22, 22, 22]), Spacer(1, 4 * mm),
            Paragraph("Débit : sommes facturées ; crédit : règlements et avoirs. Une écriture non lettrée n'est pas encore rapprochée "
                      "d'une facture ou d'un règlement. Montants toutes taxes comprises, tels qu'enregistrés en comptabilité.", st["petit"])]
     doc.build(el)
