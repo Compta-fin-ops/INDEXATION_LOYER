@@ -152,6 +152,19 @@ def controler(sit: SituationBail, proposition: dict, dossier: dict, envois: list
     else:
         c.append(Controle("Montant strictement positif", montant > 0, f"{_eur(montant)} par occurrence, sans abonnement de référence."))
 
+    revision = _d(proposition.get("date_revision"))
+    if revision and debut and debut.day != revision.day:
+        precedente = _d(sit.courant.get("fin")) if sit.courant else None
+        c.append(Controle("Jour de facturation calé sur la date de révision", False,
+                          f"Les factures sont émises le {debut.day} du mois, la révision prend effet le {_fr(revision)}. "
+                          + (f"L'échéance du {_fr(precedente)} reste à l'ancien loyer : si elle facture d'avance la période qui suit, "
+                             "elle aurait dû porter le nouveau loyer, et un rappel sera dû." if precedente else
+                             "Vérifier que la première facture au nouveau loyer couvre bien la période qui commence à la révision."),
+                          bloquant=False))
+    if debut and debut.day > 28:
+        c.append(Controle("Jour de facturation présent dans tous les mois", False,
+                          f"Factures le {debut.day} du mois : le comportement de Pennylane les mois plus courts n'a pas été vérifié.",
+                          bloquant=False))
     if (bail.get("statut_revision") or "").startswith("⚠"):
         c.append(Controle("Indice de la dernière révision publié", False,
                           "Indice attendu : le loyer facturé sera provisoire, un rappel sera dû.", bloquant=False))

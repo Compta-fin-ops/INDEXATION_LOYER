@@ -236,3 +236,40 @@ def test_page_des_baux_par_societe_filtres_et_recherche(tmp_path):
     recherche = c.get("/baux?q=halles").text
     assert recherche.count('<details class="carte societe"') == 1 and "SCI des Halles" in recherche
     assert "Aucun bail ne correspond" in c.get("/baux?q=zzzz-introuvable").text
+
+
+def test_controles_d_enchainement_client_tva_mode_et_sortie():
+    # abonnement suivant qui chevauche l'abonnement en cours
+    s = rp.analyser_bail(_bail(), [_abo(), _abo(id=501, statut="not_started", debut="2027-03-01", fin="2028-02-01")], [_facture()], AUJ)
+    assert "CONTINUITE" in _types(s) and "chevauche" in next(e.titre for e in s.ecarts if e.type == "CONTINUITE")
+    # trou d'une échéance entre les deux
+    s = rp.analyser_bail(_bail(), [_abo(), _abo(id=501, statut="not_started", debut="2027-05-01", fin="2028-02-01")], [_facture()], AUJ)
+    assert "01/04/2027 n'est couverte" in next(e.detail for e in s.ecarts if e.type == "CONTINUITE")
+    # enchaînement exact, au loyer révisé connu : conforme ; au mauvais montant : signalé
+    bail = _bail(loyer_prochain_annuel=13200.0)
+    s = rp.analyser_bail(bail, [_abo(), _abo(id=501, statut="not_started", debut="2027-04-01", fin="2028-03-01", montant_ht=1200.0)], [_facture()], AUJ)
+    assert not {"CONTINUITE", "MONTANT_SUIVANT"} & _types(s)
+    s = rp.analyser_bail(bail, [_abo(), _abo(id=501, statut="not_started", debut="2027-04-01", fin="2028-03-01")], [_facture()], AUJ)
+    assert "MONTANT_SUIVANT" in _types(s) and "loyer révisé" in next(e.titre for e in s.ecarts if e.type == "MONTANT_SUIVANT")
+    # autre client, TVA différente, factures finalisées
+    lignes = [{"label": "Loyer", "tva": "FR_100", "prix": "1150", "quantite": 1.0}]
+    s = rp.analyser_bail(_bail(), [_abo(customer_id=11, mode="finalized", parametres={"lignes": lignes})], [_facture()], AUJ)
+    assert {"CLIENT", "TVA", "MODE"} <= _types(s)
+    # locataire sorti : abonnement encore actif signalé ; sans abonnement, aucune fausse alerte
+    s = rp.analyser_bail(_bail(date_sortie="2026-10-31"), [_abo()], [_facture()], AUJ)
+    assert "APRES_SORTIE" in _types(s)
+    s = rp.analyser_bail(_bail(date_sortie="2026-10-31"), [], [], AUJ)
+    assert not {"SANS_ABONNEMENT", "TERME_ECHU"} & _types(s)
+
+
+def test_avertissement_jour_de_facturation_et_revision():
+    from console import ecriture
+    sit = rp.analyser_bail(_bail(date_prochaine_revision="2026-12-01", loyer_prochain_annuel=12900.0, date_revision_suivante="2027-12-01"),
+                           [_abo(debut="2025-12-30", fin="2026-11-30", prochaine_occurrence="2026-11-30")], [_facture()], AUJ)
+    prop = rp.proposer_abonnement(sit.bail, sit.courant, AUJ, None, sit.courant)
+    assert prop["debut"] == "2026-12-30" and prop["date_revision"] == "2026-12-01"
+    prop["corps"] = ecriture.imposer_brouillon(prop["corps"])
+    controles = {c.libelle: c for c in ecriture.controler(sit, prop, {}, [], AUJ, True)}
+    jour = controles["Jour de facturation calé sur la date de révision"]
+    assert not jour.ok and not jour.bloquant and "L'échéance du 30/11/2026 reste à l'ancien loyer" in jour.detail
+    assert not controles["Jour de facturation présent dans tous les mois"].ok

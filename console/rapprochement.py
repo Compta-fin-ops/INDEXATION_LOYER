@@ -168,13 +168,31 @@ def analyser_bail(bail: dict, abonnements: list[dict], factures: list[dict], auj
     derniere = _d(bail.get("date_derniere_revision"))
     n = ECHEANCES_PAR_AN.get(bail.get("periodicite"), 12)
 
+    sortie = _d(bail.get("date_sortie"))
+    sorti = sortie is not None and sortie <= aujourdhui
+    for a in actifs:                                     # abonnement rattaché au bail mais facturé à un autre client
+        if bail.get("customer_id") is not None and a.get("customer_id") is not None and a["customer_id"] != bail["customer_id"]:
+            e("CLIENT", "bloquant", f"Abonnement n° {a['id']} facturé à un autre client que celui du bail",
+              detail=f"Client de l'abonnement : n° {a['customer_id']} ; client du bail : n° {bail['customer_id']}.",
+              action="Vérifier le client du bail ou celui de l'abonnement",
+              montant=round((a.get("montant_ht") or 0) * occurrences_par_an(a), 2))
+    if sorti:
+        for a in actifs:
+            fin_a = _d(a.get("fin"))
+            if fin_a is None or fin_a > sortie:
+                e("APRES_SORTIE", "bloquant", f"Abonnement n° {a['id']} actif après la sortie du locataire le {_fr(sortie)}",
+                  detail="Abonnement " + ("sans terme" if fin_a is None else f"jusqu'au {_fr(fin_a)}") + " : il facturerait un locataire parti.",
+                  action="Arrêter l'abonnement dans Pennylane", montant=round((a.get("montant_ht") or 0) * occurrences_par_an(a), 2))
+
     if len(en_cours) > 1:
         e("DOUBLON", "bloquant", "Plusieurs abonnements en cours pour ce bail",
           detail="Abonnements " + ", ".join(f"n° {a['id']} ({_eur(a['montant_ht'])})" for a in en_cours),
           action="Arrêter l'abonnement en trop dans Pennylane",
           montant=sum(a["montant_ht"] * occurrences_par_an(a) for a in en_cours[:-1]))
 
-    if s.courant is None:
+    if s.courant is None and sorti:
+        pass                                             # locataire parti : plus rien à facturer
+    elif s.courant is None:
         if s.suivant is not None:
             e("DEMARRAGE", "info", f"Abonnement n° {s.suivant['id']} programmé au {_fr(_d(s.suivant.get('debut')))}")
         elif s.dernier_termine is not None:
@@ -238,6 +256,37 @@ def analyser_bail(bail: dict, abonnements: list[dict], factures: list[dict], auj
                       if bail.get("loyer_prochain_annuel") is not None else
                       "Loyer révisé non encore connu : l'indice de la révision n'est pas publié."),
               action="Créer l'abonnement suivant au loyer révisé", montant=s.attendu_annuel)
+        if s.suivant is not None:                       # enchaînement avec l'abonnement de la période suivante
+            suiv_debut, attendu_debut = _d(s.suivant.get("debut")), ajouter_mois(fin, _pas_mois(c)) if fin else None
+            if suiv_debut and (fin is None or suiv_debut <= fin):
+                e("CONTINUITE", "bloquant", f"L'abonnement n° {s.suivant['id']} chevauche l'abonnement en cours",
+                  detail=f"Il commence le {_fr(suiv_debut)} ; l'abonnement n° {c['id']} "
+                         + ("n'a pas de terme" if fin is None else f"court jusqu'au {_fr(fin)}") + " : deux loyers seraient facturés.",
+                  action="Borner l'abonnement en cours dans Pennylane", montant=s.attendu_annuel)
+            elif suiv_debut and attendu_debut and suiv_debut > attendu_debut:
+                e("CONTINUITE", "bloquant", f"Échéance(s) non facturée(s) entre les deux abonnements",
+                  detail=f"Dernière échéance de l'abonnement n° {c['id']} le {_fr(fin)}, première du n° {s.suivant['id']} "
+                         f"le {_fr(suiv_debut)} : l'échéance du {_fr(attendu_debut)} n'est couverte par aucun abonnement.",
+                  action="Facturer l'échéance manquante, ou corriger la date de début dans Pennylane", montant=s.facture_annuel / n)
+            revise = prochaine is not None and suiv_debut is not None and suiv_debut >= prochaine
+            cible = ((bail.get("loyer_prochain_annuel") + (bail.get("charges_annuelles") or 0)) if revise and bail.get("loyer_prochain_annuel") is not None
+                     else None if revise else s.attendu_annuel)
+            facture_suivant = round((s.suivant.get("montant_ht") or 0) * occurrences_par_an(s.suivant), 2)
+            if cible is not None and abs(cible - facture_suivant) > TOLERANCE_ANNUELLE:
+                e("MONTANT_SUIVANT", "bloquant", f"L'abonnement n° {s.suivant['id']} ne facture pas le loyer "
+                  + ("révisé" if revise else "en vigueur"),
+                  detail=f"Attendu {_eur(cible / n)} par échéance, programmé {_eur(s.suivant.get('montant_ht') or 0)}.",
+                  action="Corriger le montant de l'abonnement suivant dans Pennylane", montant=round(cible - facture_suivant, 2))
+        lues = (c.get("parametres") or {}).get("lignes")
+        attendue = CODES_TVA.get(float(bail["tva_pct"])) if bail.get("tva_pct") is not None else None
+        if lues and attendue and any(l.get("tva") and l["tva"] != attendue for l in lues):
+            e("TVA", "a_traiter", "Taux de TVA de l'abonnement différent de celui du bail",
+              detail="Abonnement : " + ", ".join(sorted({l["tva"] for l in lues if l.get("tva")})) + f" ; bail : {attendue}.",
+              action="Corriger le taux sur le bail ou sur l'abonnement")
+        if c.get("mode") in ("finalized", "email"):
+            e("MODE", "info", "Factures de l'abonnement émises sans relecture",
+              detail="Mode « " + ("finalisées et envoyées par courriel" if c["mode"] == "email" else "finalisées") + " » : "
+                     "elles ne passent pas en brouillon avant l'envoi.")
         precedente = _d(c.get("occurrence_precedente"))
         if precedente and not any((_d(f.get("date")) or date.min) >= precedente and f.get("statut") not in STATUTS_HORS_FACTURE
                                   for f in factures):
@@ -495,6 +544,7 @@ def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, regl
             "derniere_occurrence": dernier.isoformat() if dernier else None, "reprise": _reprise(modele, repris, mention),
             "envoyable": bail.get("customer_id") is not None and tva is not None, "tva_connue": tva is not None,
             "loyer_connu": loyer_connu, "periode_revisee": periode_revisee, "loyer_annuel": loyer,
+            "date_revision": revise_le.isoformat() if periode_revisee and revise_le else None,
             "note": ("Loyer révisé inconnu : l'indice de la révision du " + _fr(revise_le) + " n'est pas publié. "
                      "Le montant ci-dessous est l'ancien loyer") if not loyer_connu else
                     ("Période au loyer révisé le " + _fr(revise_le) + ", bornée à la révision suivante du " + _fr(prochaine))
