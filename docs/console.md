@@ -15,7 +15,7 @@ brouillon. Il n'y a plus de classeur Excel dans le circuit.
                                    │
               rapprochement : écarts gradués, échéancier, abonnement proposé
                                    │
-     console web : baux par société, écarts, échéancier, indices, dossier, bail, pièces, courriers
+     console web : baux par société, indices, dossier, bail, pièces, courriers
 ```
 
 ## Les baux dans la console
@@ -141,6 +141,15 @@ Une réindexation passe par quatre états : « attendre l'indice », « indice a
 « à préparer » dès que l'indice est publié ou qu'un gel est décidé, « prête » quand le courrier est daté comme
 envoyé et que l'abonnement suivant existe dans Pennylane.
 
+### Créer un bail à partir d'un abonnement Pennylane
+
+Un abonnement sans bail apparaît sur l'accueil, dans sa société (filtre « À régulariser »), avec le lien
+« Créer le bail à partir de cet abonnement ». Le formulaire reprend le client, la périodicité, le lien vers
+l'abonnement, et ventile ses lignes : celles qui parlent de charges ou de provision forment la provision sur
+charges, celles qui parlent de loyer forment le loyer, la TVA de la ligne de loyer donne le taux. Le loyer
+pré-rempli est celui facturé aujourd'hui : si le bail a déjà été révisé, saisir le loyer d'origine ou la reprise.
+La date d'effet et l'indice restent à saisir d'après le bail.
+
 ## Le principe de facturation : un abonnement par période d'indexation
 
 La question « comment changer le loyer à la date anniversaire » est réglée par la structure, pas par une
@@ -151,7 +160,7 @@ le nombre d'occurrences de la période suivante, et affiche le corps de l'abonne
 | Situation | Ce que la console affiche |
 |---|---|
 | Abonnement en cours au bon loyer, borné à la révision | Conforme |
-| Abonnement en cours sans terme, ou qui dépasse la révision | À traiter : l'ancien loyer continuerait d'être facturé |
+| Abonnement en cours sans terme, ou qui dépasse la révision | À traiter : le nombre d'échéances facturées à l'ancien loyer après la réindexation, et la date où l'abonnement aurait dû s'arrêter. La création de l'abonnement suivant est bloquée tant qu'il n'est pas raccourci dans Pennylane |
 | Dernière occurrence à moins de 45 jours du début de la période suivante | À traiter : préparer la période suivante |
 | Révision passée, abonnement resté à l'ancien loyer | Bloquant, avec le rappel de loyer à facturer |
 | Abonnement terminé et rien derrière, ou bail sans abonnement | Bloquant : le loyer n'est plus facturé |

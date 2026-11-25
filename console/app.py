@@ -466,10 +466,13 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
                 lignes.append({"sit": sit, "etats": etats.get(b["id"], set()), "r": r, "n": rp.ECHEANCES_PAR_AN.get(b.get("periodicite"), 12)})
             if debut or fin:
                 lignes.sort(key=lambda x: x["r"]["date"])
-            if lignes or not (filtre or mot or periode or indice):
-                societes.append({"a": a, "lignes": lignes,
+            orphelins = [e for e in a["ecarts"] if e.type == "ORPHELIN"]
+            if lignes or not (filtre or mot or periode or indice) or (orphelins and filtre == "regulariser" and not (mot or periode or indice)):
+                societes.append({"a": a, "lignes": lignes, "orphelins": [e for e in a["ecarts"] if e.type == "ORPHELIN"]
+                                 if filtre in ("", "regulariser") and not (periode or indice) else [],
                                  "compte": {f: sum(1 for x in a["situations"] if f in etats.get(x.bail["id"], set())) for f in FILTRES_BAUX}})
         compte = {f: sum(1 for v in etats.values() if f in v) for f in FILTRES_BAUX}
+        compte["orphelins"] = sum(1 for a in an for e in a["ecarts"] if e.type == "ORPHELIN")
         params = {k: v for k, v in (("filtre", filtre), ("q", q), ("periode", periode), ("indice", indice),
                                     ("du", du if periode == "perso" else ""), ("au", au if periode == "perso" else "")) if v}
 
@@ -481,25 +484,6 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
             request, page="baux", societes=societes, filtre=filtre, q=q, horizon=horizon, compte=compte, FILTRES=FILTRES_BAUX,
             PERIODES=PERIODES, INDICES_DISPO=INDICES_DISPO, periode=periode, du=du, au=au, indice=indice, debut=debut, fin=fin,
             lien=lien, params=params, ouvert=bool(params), nb_baux=sum(len(x["lignes"]) for x in societes)))
-
-    @app.get("/ecarts", response_class=HTMLResponse)
-    def ecarts(request: Request, gravite: str = "", type: str = "", dossier: str = ""):
-        an = analyses()
-        ordre = {g: i for i, g in enumerate(rp.GRAVITES)}
-        tous = sorted((e for a in an for e in a["ecarts"]), key=lambda e: (ordre[e.gravite], -abs(e.montant)))
-        filtres = [e for e in tous if (not gravite or e.gravite == gravite) and (not type or e.type == type)
-                   and (not dossier or e.dossier == dossier)]
-        return gabarits.TemplateResponse(request, "ecarts.html", contexte(
-            request, page="ecarts", ecarts=filtres, total=len(tous), f={"gravite": gravite, "type": type, "dossier": dossier},
-            types_presents=sorted({e.type for e in tous}, key=lambda t: TYPES.get(t, t)),
-            noms={a["dossier"]["code"]: a["dossier"]["nom"] for a in an}))
-
-    @app.get("/echeancier", response_class=HTMLResponse)
-    def page_echeancier(request: Request, horizon: int = 120):
-        an = analyses()
-        return gabarits.TemplateResponse(request, "echeancier.html", contexte(
-            request, page="echeancier", lignes=rp.echeancier(an, jour(), horizon), horizon=horizon,
-            noms={a["dossier"]["code"]: a["dossier"]["nom"] for a in an}))
 
     @app.get("/dossiers/{code}", response_class=HTMLResponse)
     def dossier(request: Request, code: str):
@@ -682,12 +666,32 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         note = None
         abo = cx.execute("SELECT * FROM abonnements WHERE dossier=? AND id=?", (code, abonnement)).fetchone() if abonnement else None
         if abo is not None:                              # bail créé à partir d'un abonnement lu dans Pennylane
-            par_an = rp.occurrences_par_an(dict(abo))
+            abo = dict(abo)
+            try:
+                abo["parametres"] = json.loads(abo.get("parametres") or "{}")
+            except ValueError:
+                abo["parametres"] = {}
+            par_an = rp.occurrences_par_an(abo)
             depart["periodicite"] = {12: "Mensuelle", 4: "Trimestrielle", 2: "Semestrielle", 1: "Annuelle"}.get(round(par_an), "Mensuelle")
             depart["customer_id"] = customer_id or abo["customer_id"]
-            note = (f"Bail créé à partir de l'abonnement Pennylane n° {abo['id']}, « {abo['label']} » : "
-                    f"{_eur(abo['montant_ht'], 2)} HT par occurrence, soit {_eur(abo['montant_ht'] * par_an, 2)} par an. "
-                    "Le client et la périodicité sont repris. Le loyer initial, la date d'effet et l'indice restent à saisir d'après le bail.")
+            depart["subscription_id"] = abo["id"]        # le bail est rattaché à cet abonnement, sans rien deviner
+            v = rp.ventiler(abo)
+            entete = (f"Bail créé à partir de l'abonnement Pennylane n° {abo['id']}, « {abo['label']} » : "
+                      f"{_eur(abo['montant_ht'], 2)} HT par occurrence, soit {_eur(abo['montant_ht'] * par_an, 2)} par an.")
+            if v is None:
+                note = (entete + " Ses lignes n'ont pas été lues (cliquer sur « Actualiser ») : le loyer et les charges ne sont pas ventilés. "
+                        "Le client et la périodicité sont repris ; le loyer initial, la date d'effet et l'indice restent à saisir d'après le bail.")
+            else:
+                depart["loyer_initial_annuel"] = round(v["loyer"] * par_an, 2)
+                depart["charges_annuelles"] = round(v["charges"] * par_an, 2)
+                if v["tva_pct"] is not None:
+                    depart["tva_pct"] = v["tva_pct"]
+                detail = " ; ".join(f"« {lib} » {_eur(m, 2)} → {role}" for lib, m, role in v["detail"])
+                note = (entete + f" Lignes reprises : {detail}. Loyer annuel {_eur(v['loyer'] * par_an, 2)}, provision sur charges "
+                        f"{_eur(v['charges'] * par_an, 2)}."
+                        + (" Les autres lignes ne sont pas reprises sur le bail : elles restent sur l'abonnement." if v["autres"] else "")
+                        + " Le loyer pré-rempli est celui facturé aujourd'hui : si le bail a déjà été révisé, saisir le loyer d'origine "
+                        "ou renseigner la reprise. La date d'effet et l'indice restent à saisir d'après le bail.")
         return page_bail_form(request, d, depart, [], None, avertissement=note)
 
     @app.post("/dossiers/{code}/baux")

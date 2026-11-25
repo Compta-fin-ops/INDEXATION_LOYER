@@ -86,7 +86,7 @@ def test_roles(base):
     app, chemin, admin, cx = base
     lecteur, gestionnaire, valideur = (client_connecte(app, chemin, r) for r in ("lecture", "gestion", "validation"))
     gel = {"decision": "Geler – sans rattrapage", "commentaire": "essai"}
-    for url in ("/", "/dossiers/HALLES", "/baux/1", "/indices", "/envois", "/echeancier", "/compte"):
+    for url in ("/", "/dossiers/HALLES", "/baux/1", "/indices", "/envois", "/compte"):
         assert lecteur.get(url).status_code == 200, url
     r = lecteur.post("/baux/1/revisions/1", data=gel)
     assert r.status_code == 403 and "Rien n" in r.text and cx.execute("SELECT COUNT(*) AS n FROM decisions").fetchone()["n"] == 0

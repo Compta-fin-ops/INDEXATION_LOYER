@@ -243,11 +243,21 @@ def analyser_bail(bail: dict, abonnements: list[dict], factures: list[dict], auj
                   action="Vérifier les paramètres du bail ou corriger l'abonnement", montant=ecart)
         deja = any(x.type == "REVISION_NON_REPERCUTEE" for x in s.ecarts)     # l'action couvre déjà le bornage
         if prochaine and (fin is None or fin >= prochaine) and not deja:
-            e("NON_BORNE", "a_traiter", "Abonnement non borné à la date anniversaire",
-              detail=f"Prochaine révision le {_fr(prochaine)} ; l'abonnement "
-                     + ("n'a pas de terme" if fin is None else f"court jusqu'au {_fr(fin)}")
-                     + " : l'ancien loyer continuerait d'être facturé après la révision.",
-              action="Borner l'abonnement, ou le remplacer à la date anniversaire")
+            dec = decalage(c, prochaine)
+            if fin is None:
+                e("NON_BORNE", "a_traiter", "Abonnement sans terme : il dépassera la date de réindexation",
+                  detail=f"Réindexation le {_fr(prochaine)} ; l'abonnement n'a pas de terme : l'ancien loyer continuerait d'être "
+                         "facturé après la révision."
+                         + (f" Sa dernière échéance devrait être celle du {_fr(dec['derniere_avant'])}." if dec["derniere_avant"] else ""),
+                  action="Borner l'abonnement dans Pennylane, ou le remplacer à la date anniversaire")
+            else:
+                e("NON_BORNE", "a_traiter", f"Abonnement qui dépasse la date de réindexation de {dec['nombre']} échéance(s)",
+                  detail=f"Réindexation le {_fr(prochaine)} ; l'abonnement court jusqu'au {_fr(fin)} : "
+                         + (f"l'échéance du {_fr(dec['apres'][0])} serait facturée" if dec["nombre"] == 1 else
+                            f"les échéances du {_fr(dec['apres'][0])} au {_fr(dec['apres'][-1])} seraient facturées")
+                         + " à l'ancien loyer."
+                         + (f" Sa dernière échéance devrait être celle du {_fr(dec['derniere_avant'])}." if dec["derniere_avant"] else ""),
+                  action="Raccourcir l'abonnement dans Pennylane, puis actualiser")
         elif fin and s.suivant is None and (
                 ajouter_mois(fin, _pas_mois(c)) - aujourdhui <= timedelta(days=DELAI_RENOUVELLEMENT)):
             e("RENOUVELLEMENT", "a_traiter",
@@ -323,6 +333,22 @@ def analyser_bail(bail: dict, abonnements: list[dict], factures: list[dict], auj
     return s
 
 
+def decalage(abo: dict, revision: date) -> dict:
+    """Échéances d'un abonnement tombant à la date de réindexation ou après, jusqu'à son terme (sans terme : aucune
+    listée), et dernière échéance qui précède la réindexation : celle où l'abonnement aurait dû s'arrêter."""
+    debut, fin = _d(abo.get("debut")), _d(abo.get("fin"))
+    apres, derniere_avant = [], None
+    if debut:
+        pas, d = _pas_mois(abo), debut
+        while d <= (fin or revision):
+            if d < revision:
+                derniere_avant = d
+            elif fin is not None:
+                apres.append(d)
+            d = ajouter_mois(d, pas)
+    return {"apres": apres, "nombre": len(apres), "derniere_avant": derniere_avant}
+
+
 def _pas_mois(abo: dict) -> int:
     intervalle = max(int(abo.get("intervalle") or 1), 1)
     return 12 * intervalle if abo.get("type_regle") == "yearly" else intervalle
@@ -342,6 +368,29 @@ def calculer_rappel(bail: dict, courant: dict, derniere: date | None, aujourdhui
     ecart = round(_attendu_echeance(bail) - (courant.get("montant_ht") or 0), 2)
     return {"echeances": echeances, "ecart_par_echeance": ecart, "montant": round(echeances * ecart, 2),
             "depuis": derniere.isoformat()}
+
+
+def ventiler(abo: dict) -> dict | None:
+    """Loyer, provision sur charges et autres lignes d'un abonnement lu dans Pennylane, par occurrence.
+
+    Une ligne dont le libellé parle de charges ou de provision est une ligne de charges ; une ligne qui parle de
+    loyer est une ligne de loyer ; à défaut de libellé « loyer », la plus forte des autres l'est. None si les
+    lignes n'ont pas été lues."""
+    lues = (abo.get("parametres") or {}).get("lignes")
+    if not lues:
+        return None
+    montant = lambda l: round(l["quantite"] * float(l["prix"]), 2)
+    est_charge = lambda l: any(m in l["label"].lower() for m in ("charge", "provision"))
+    charges = [l for l in lues if est_charge(l)]
+    reste = [l for l in lues if not est_charge(l)]
+    loyers = [l for l in reste if "loyer" in l["label"].lower()] or ([max(reste, key=montant)] if reste else [])
+    autres = [l for l in reste if l not in loyers]
+    codes = {l["tva"] for l in loyers if l.get("tva")}
+    taux = {v: k for k, v in CODES_TVA.items()}
+    return {"loyer": round(sum(map(montant, loyers)), 2), "charges": round(sum(map(montant, charges)), 2),
+            "autres": [(l["label"], montant(l)) for l in autres],
+            "tva_pct": taux.get(codes.pop()) if len(codes) == 1 else None,
+            "detail": [(l["label"], montant(l), "loyer" if l in loyers else "charges" if l in charges else "autre") for l in lues]}
 
 
 def reference_rappel(bail: dict, revision: date) -> str:

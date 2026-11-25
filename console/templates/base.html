@@ -12,8 +12,6 @@
   <a class="marque" href="/">Console des loyers{% if environnement == 'test' %} <span class="pastille test">TEST</span>{% endif %}</a>
   {% if utilisateur %}<nav>
     <a href="/" class="{{ 'actif' if page in ('baux', 'bord') }}">Baux</a>
-    <a href="/ecarts" class="{{ 'actif' if page == 'ecarts' }}">Écarts</a>
-    <a href="/echeancier" class="{{ 'actif' if page == 'echeancier' }}">Échéancier</a>
     <a href="/indices" class="{{ 'actif' if page == 'indices' }}">Indices</a>
     <a href="/creations" class="{{ 'actif' if page == 'creations' }}">Créations en lot</a>
     <a href="/envois" class="{{ 'actif' if page == 'envois' }}">Journal des envois</a>

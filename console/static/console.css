@@ -148,3 +148,5 @@ form.recherche input[type=search] { padding: 7px 10px; border: 1px solid var(--t
 form.recherche label.choix { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--discret); }
 form.recherche select, form.recherche input[type=date] { padding: 6px 8px; border: 1px solid var(--trait); border-radius: 8px; font: inherit; background: var(--carte); color: inherit; }
 form.recherche .perso[hidden] { display: none; }
+details.societe > .orphelins { padding: 0 18px 6px; }
+details.societe > .orphelins p { margin: 0 0 8px; }

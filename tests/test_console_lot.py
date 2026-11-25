@@ -333,3 +333,40 @@ def test_montant_relu_different_du_montant_envoye(base, monkeypatch):
     e = cx.execute("SELECT * FROM envois").fetchone()
     assert e["etat"] == "créé" and e["verification"].startswith("ÉCART") and "ÉCART" in c.get(f"/envois/{e['id']}").text
     assert ecriture.verifier_reponse("facture", {"invoice_lines": [{"raw_currency_unit_price": "10", "quantity": 3}]}, {}).startswith("Montant non relu")
+
+
+def test_bail_cree_depuis_un_abonnement_ventile_et_decalage_d_un_mois(base):
+    """Cas « JMC2L » : bail créé depuis un abonnement de 12 000 € par mois (loyer et charges), abonnement qui dure un
+    mois de trop par rapport à la date de réindexation du bail."""
+    _, c, cx, _ = base(True)
+    lignes = [{"label": "Loyer bureaux", "unit": "mois", "quantite": 1.0, "prix": "10000.00", "tva": "FR_200", "description": "",
+               "produit": 7, "section": None, "remise": None, "montant_ht": 10000.0},
+              {"label": "Provision sur charges", "unit": "mois", "quantite": 1.0, "prix": "2000.00", "tva": "FR_200", "description": "",
+               "produit": None, "section": None, "remise": None, "montant_ht": 2000.0}]
+    cx.execute("""INSERT INTO abonnements (id, dossier, customer_id, label, statut, mode, debut, fin, prochaine_occurrence,
+                  type_regle, intervalle, montant_ht, parametres) VALUES (19938902016, 'HALLES', 5151, 'JMC2L', 'in_progress',
+                  'awaiting_validation', '2026-01-01', '2027-01-01', '2026-12-01', 'monthly', 1, 12000.0, ?)""",
+               (json.dumps({**PARAMETRES, "lignes": lignes, "conditions": "upon_receipt", "paiement": "offline", "modele": None}),))
+    cx.commit()
+    page = c.get("/?filtre=regulariser").text
+    assert "Abonnement n° 19938902016 sans bail" in page
+    form = c.get("/dossiers/HALLES/baux/nouveau?customer_id=5151&abonnement=19938902016").text
+    assert 'name="loyer_initial_annuel" value="120000"' in form and 'name="charges_annuelles" value="24000"' in form
+    assert 'name="subscription_id" value="19938902016"' in form and "« Loyer bureaux » 10" in form and "→ charges" in form
+    # le bail prend effet le 01/01/2026, révision annuelle au 01/01/2027 ; l'abonnement va jusqu'au 01/01/2027 inclus
+    r = c.post("/dossiers/HALLES/baux", data={"code": "B09", "locataire": "JMC2L", "local": "Bureaux", "date_effet": "2026-01-01",
+                                              "loyer_initial_annuel": "120000", "charges_annuelles": "24000", "tva_pct": "20",
+                                              "periodicite": "Mensuelle", "indice": "ILAT", "customer_id": "5151",
+                                              "subscription_id": "19938902016"}, follow_redirects=False)
+    bail_id = int(r.headers["location"].rsplit("/", 1)[1])
+    fiche = c.get(f"/baux/{bail_id}").text
+    assert "Abonnement qui dépasse la date de réindexation de 1 échéance(s)" in fiche
+    assert "l&#39;échéance du 01/01/2027 serait facturée à l&#39;ancien loyer" in fiche
+    assert "dernière échéance devrait être celle du 01/12/2026" in fiche
+    creation = c.get(f"/baux/{bail_id}/abonnement").text
+    assert "Abonnement en cours arrêté avant la réindexation" in creation and "Création impossible" in creation
+    # une fois l'abonnement raccourci dans Pennylane, la période suivante démarre à la réindexation
+    cx.execute("UPDATE abonnements SET fin='2026-12-01' WHERE id=19938902016")
+    cx.commit()
+    creation = c.get(f"/baux/{bail_id}/abonnement").text
+    assert "Dernière échéance le 01/12/2026, avant la réindexation du 01/01/2027" in creation and "<dd>01/01/2027</dd>" in creation

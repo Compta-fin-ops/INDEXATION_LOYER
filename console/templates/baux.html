@@ -7,7 +7,7 @@
 
 <div class="tuiles">
   <a class="tuile {{ 'alerte' if compte.corriger else 'bon' }}{{ ' choisie' if filtre == 'corriger' }}" href="{{ lien(filtre='' if filtre == 'corriger' else 'corriger') }}"><div class="libelle">À corriger</div><div class="valeur">{{ compte.corriger }}</div><div class="note">bail(s) dont le loyer n'est pas facturé, ou l'est à tort</div></a>
-  <a class="tuile {{ 'attention' if compte.regulariser else 'bon' }}{{ ' choisie' if filtre == 'regulariser' }}" href="{{ lien(filtre='' if filtre == 'regulariser' else 'regulariser') }}"><div class="libelle">À régulariser</div><div class="valeur">{{ compte.regulariser }}</div><div class="note">abonnement à borner, à préparer, à vérifier</div></a>
+  <a class="tuile {{ 'attention' if compte.regulariser else 'bon' }}{{ ' choisie' if filtre == 'regulariser' }}" href="{{ lien(filtre='' if filtre == 'regulariser' else 'regulariser') }}"><div class="libelle">À régulariser</div><div class="valeur">{{ compte.regulariser }}</div><div class="note">abonnement à borner, à préparer, à vérifier{% if compte.orphelins %} · {{ compte.orphelins }} abonnement(s) sans bail{% endif %}</div></a>
   <a class="tuile {{ 'attention' if compte.preparer else 'bon' }}{{ ' choisie' if filtre == 'preparer' }}" href="{{ lien(filtre='' if filtre == 'preparer' else 'preparer') }}"><div class="libelle">Réindexations à préparer</div><div class="valeur">{{ compte.preparer }}</div><div class="note">indice publié, sous {{ horizon }} jours</div></a>
   <a class="tuile{{ ' choisie' if filtre == 'attente' }}" href="{{ lien(filtre='' if filtre == 'attente' else 'attente') }}"><div class="libelle">En attente d'indice</div><div class="valeur">{{ compte.attente }}</div><div class="note">révision échue ou à venir sans indice</div></a>
 </div>
@@ -36,9 +36,15 @@
 <details class="carte societe"{{ ' open' if ouvert }}>
   <summary>
     <span class="nom"><span class="fort">{{ a.dossier.nom }}</span> <span class="discret petit">{{ a.dossier.code }} · {{ a.nb_baux }} bail/baux</span></span>
-    <span class="etats">{% for f, libelle in FILTRES.items() if x.compte[f] %}<span class="pastille {{ {'corriger': 'bloquant', 'regulariser': 'a_traiter', 'preparer': 'a_traiter', 'attente': 'neutre'}[f] }}">{{ x.compte[f] }} {{ libelle | lower }}</span> {% endfor %}</span>
+    <span class="etats">{% if x.orphelins %}<span class="pastille a_traiter">{{ x.orphelins | length }} abonnement(s) sans bail</span> {% endif %}{% for f, libelle in FILTRES.items() if x.compte[f] %}<span class="pastille {{ {'corriger': 'bloquant', 'regulariser': 'a_traiter', 'preparer': 'a_traiter', 'attente': 'neutre'}[f] }}">{{ x.compte[f] }} {{ libelle | lower }}</span> {% endfor %}</span>
     <span class="liens petit"><a href="/dossiers/{{ a.dossier.code }}">Fiche</a> · <a href="/dossiers/{{ a.dossier.code }}/modifier">Modifier la société</a> · <a href="/dossiers/{{ a.dossier.code }}/baux/nouveau">Nouveau bail</a> · <a href="/dossiers/{{ a.dossier.code }}/situation-loyers.pdf">Situation PDF</a></span>
   </summary>
+  {% if x.orphelins %}
+  <div class="orphelins">
+    {% for e in x.orphelins %}<p class="petit"><span class="pastille a_traiter">Sans bail</span> {{ e.titre }} — {{ e.detail }}
+      {% if e.customer_id %}<a class="fort" href="/dossiers/{{ e.dossier }}/baux/nouveau?customer_id={{ e.customer_id }}&amp;abonnement={{ e.abonnement_id }}">Créer le bail à partir de cet abonnement</a>{% endif %}</p>{% endfor %}
+  </div>
+  {% endif %}
   {% if x.lignes %}
   <div class="defile"><table>
     <thead><tr><th>Bail</th><th>Locataire et local</th><th class="num">Loyer en vigueur</th><th>{{ 'Réindexation de la période' if debut or fin else 'Prochaine réindexation' }}</th><th>Abonnement Pennylane</th><th>État</th><th>Actions</th></tr></thead>

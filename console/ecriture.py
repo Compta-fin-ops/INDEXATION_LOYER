@@ -34,7 +34,7 @@ from datetime import date, datetime, timedelta
 
 from . import jetons, referentiel
 from .pennylane_api import BASE_V2
-from .rapprochement import CODES_TVA, INTERVALLE_MOIS, SituationBail, _d, _eur, _fr
+from .rapprochement import CODES_TVA, INTERVALLE_MOIS, SituationBail, _d, _eur, _fr, decalage
 
 MODE_IMPOSE = "awaiting_validation"
 VARIATION_MAX = 0.15              # écart toléré avec le montant de l'abonnement précédent
@@ -153,6 +153,14 @@ def controler(sit: SituationBail, proposition: dict, dossier: dict, envois: list
         c.append(Controle("Montant strictement positif", montant > 0, f"{_eur(montant)} par occurrence, sans abonnement de référence."))
 
     revision = _d(proposition.get("date_revision"))
+    if revision and sit.courant is not None and fin_courant is not None:
+        dec = decalage(sit.courant, revision)
+        c.append(Controle("Abonnement en cours arrêté avant la réindexation", fin_courant < revision,
+                          f"Dernière échéance le {_fr(fin_courant)}, avant la réindexation du {_fr(revision)}." if fin_courant < revision else
+                          f"L'abonnement n° {sit.courant['id']} court jusqu'au {_fr(fin_courant)}, après la réindexation du {_fr(revision)} : "
+                          f"{dec['nombre']} échéance(s) seraient facturées à l'ancien loyer. Le raccourcir dans Pennylane"
+                          + (f" pour que sa dernière échéance soit celle du {_fr(dec['derniere_avant'])}" if dec["derniere_avant"] else "")
+                          + ", puis actualiser : le nouvel abonnement démarrera alors à la réindexation."))
     if revision and debut and debut.day != revision.day:
         precedente = _d(sit.courant.get("fin")) if sit.courant else None
         c.append(Controle("Jour de facturation calé sur la date de révision", False,

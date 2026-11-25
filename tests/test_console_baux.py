@@ -137,7 +137,7 @@ def test_saisies_refusees(console):
 def test_modification_tracee_et_revisions_apres_le_terme(console, indices):
     c, cx, bail_id, _ = console
     for url in (f"/baux/{bail_id}/modifier", "/nouveau-dossier", "/dossiers/HALLES/modifier", "/dossiers/HALLES/baux/nouveau",
-                "/dossiers/HALLES", "/", "/echeancier", "/ecarts", f"/baux/{bail_id}/abonnement"):
+                "/dossiers/HALLES", "/", f"/baux/{bail_id}/abonnement"):
         assert c.get(url).status_code == 200, url
     r = c.post(f"/baux/{bail_id}", data={**BAIL, "duree_ans": "3", "date_fin": "", "plafond_annuel_pct": "1,5"}, follow_redirects=False)
     assert r.status_code == 303

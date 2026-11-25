@@ -179,9 +179,12 @@ def test_pages_et_api(base_demo):
     c = client_connecte(creer_app(base_demo, AUJ), base_demo)
     accueil = c.get("/")
     assert accueil.status_code == 200 and "Données simulées" in accueil.text and "SCI du Parc" in accueil.text
-    for url in ("/ecarts", "/ecarts?gravite=bloquant&dossier=PARC", "/echeancier?horizon=365", "/dossiers/PARC"):
+    for url in ("/?filtre=regulariser", "/dossiers/PARC"):
         assert c.get(url).status_code == 200, url
     assert c.get("/dossiers/INCONNU").status_code == 404 and c.get("/baux/99999").status_code == 404
+    assert c.get("/ecarts").status_code == 404 and c.get("/echeancier").status_code == 404           # pages retirées
+    regulariser = c.get("/?filtre=regulariser").text
+    assert "Sans bail</span>" in regulariser and "Créer le bail à partir de cet abonnement" in regulariser
     s = c.get("/api/synthese").json()
     assert s["nb_baux"] == 78 and len(s["dossiers"]) == 10 and s["attendu"] > s["facture"]
     bloquants = c.get("/api/ecarts?gravite=bloquant").json()
