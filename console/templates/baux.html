@@ -1,0 +1,63 @@
+{% extends "base.html" %}{% import "_ecart.html" as E with context %}
+{% block titre %}Baux · Console des loyers{% endblock %}
+{% block contenu %}
+<h1>Baux par société</h1>
+<p class="sous-titre">{{ nb_baux }} bail/baux affiché(s){% if filtre %} · filtre « {{ FILTRES[filtre] }} » · <a href="/baux{{ '?q=' ~ q if q }}">retirer le filtre</a>{% endif %}. <a href="/nouveau-dossier">Nouvelle société</a> · <a href="/import">Importer un fichier Excel ou CSV</a></p>
+
+<div class="tuiles">
+  <a class="tuile {{ 'alerte' if compte.corriger else 'bon' }}{{ ' choisie' if filtre == 'corriger' }}" href="/baux?filtre={{ '' if filtre == 'corriger' else 'corriger' }}{{ '&q=' ~ q if q }}"><div class="libelle">À corriger</div><div class="valeur">{{ compte.corriger }}</div><div class="note">bail(s) dont le loyer n'est pas facturé, ou l'est à tort</div></a>
+  <a class="tuile {{ 'attention' if compte.regulariser else 'bon' }}{{ ' choisie' if filtre == 'regulariser' }}" href="/baux?filtre={{ '' if filtre == 'regulariser' else 'regulariser' }}{{ '&q=' ~ q if q }}"><div class="libelle">À régulariser</div><div class="valeur">{{ compte.regulariser }}</div><div class="note">abonnement à borner, à préparer, à vérifier</div></a>
+  <a class="tuile {{ 'attention' if compte.preparer else 'bon' }}{{ ' choisie' if filtre == 'preparer' }}" href="/baux?filtre={{ '' if filtre == 'preparer' else 'preparer' }}{{ '&q=' ~ q if q }}"><div class="libelle">Réindexations à préparer</div><div class="valeur">{{ compte.preparer }}</div><div class="note">indice publié, sous {{ horizon }} jours</div></a>
+  <a class="tuile{{ ' choisie' if filtre == 'attente' }}" href="/baux?filtre={{ '' if filtre == 'attente' else 'attente' }}{{ '&q=' ~ q if q }}"><div class="libelle">En attente d'indice</div><div class="valeur">{{ compte.attente }}</div><div class="note">révision échue ou à venir sans indice</div></a>
+</div>
+
+<form method="get" action="/baux" class="recherche">
+  {% if filtre %}<input type="hidden" name="filtre" value="{{ filtre }}">{% endif %}
+  <input type="search" name="q" value="{{ q }}" placeholder="Société, code du bail, locataire, local" aria-label="Rechercher">
+  <button type="submit">Rechercher</button>
+  {% if q %}<a href="/baux{{ '?filtre=' ~ filtre if filtre }}">Effacer</a>{% endif %}
+  <span class="espace"></span>
+  <button type="button" data-tout="1">Tout déplier</button> <button type="button" data-tout="0">Tout replier</button>
+</form>
+
+{% for x in societes %}{% set a = x.a %}
+<details class="carte societe"{{ ' open' if ouvert }}>
+  <summary>
+    <span class="nom"><span class="fort">{{ a.dossier.nom }}</span> <span class="discret petit">{{ a.dossier.code }} · {{ a.nb_baux }} bail/baux</span></span>
+    <span class="etats">{% for f, libelle in FILTRES.items() if x.compte[f] %}<span class="pastille {{ {'corriger': 'bloquant', 'regulariser': 'a_traiter', 'preparer': 'a_traiter', 'attente': 'neutre'}[f] }}">{{ x.compte[f] }} {{ libelle | lower }}</span> {% endfor %}</span>
+    <span class="liens petit"><a href="/dossiers/{{ a.dossier.code }}">Fiche</a> · <a href="/dossiers/{{ a.dossier.code }}/modifier">Modifier la société</a> · <a href="/dossiers/{{ a.dossier.code }}/baux/nouveau">Nouveau bail</a> · <a href="/dossiers/{{ a.dossier.code }}/situation-loyers.pdf">Situation PDF</a></span>
+  </summary>
+  {% if x.lignes %}
+  <div class="defile"><table>
+    <thead><tr><th>Bail</th><th>Locataire et local</th><th class="num">Loyer en vigueur</th><th>Prochaine réindexation</th><th>Abonnement Pennylane</th><th>État</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for l in x.lignes %}{% set sit = l.sit %}{% set b = sit.bail %}
+    <tr>
+      <td><a class="fort" href="/baux/{{ b.id }}">{{ b.code }}</a></td>
+      <td>{{ b.locataire }}<div class="discret petit">{{ b.local }}</div></td>
+      <td class="num">{{ b.loyer_attendu_annuel | eur2 }}<div class="discret petit">par an HT · {{ (b.loyer_attendu_annuel / l.n) | eur2 }} par {{ {'Mensuelle': 'mois', 'Trimestrielle': 'trimestre', 'Semestrielle': 'semestre', 'Annuelle': 'an'}.get(b.periodicite, 'échéance') }}</div></td>
+      <td class="petit">{% if l.reindexation %}{% set r = l.reindexation %}{{ r.date | date_fr }} · {{ r.indice }}
+          <div>{% if r.gel %}<span class="pastille info">Gel décidé</span>{% elif r.publie %}<span class="pastille ok">Indice publié</span> {{ r.apres | eur2 }}{% else %}<span class="pastille {{ 'bloquant' if r.jours < 0 else 'neutre' }}">Indice attendu</span>{% endif %}</div>
+        {% elif b.date_prochaine_revision %}{{ b.date_prochaine_revision | date_fr }}{% else %}<span class="discret">—</span>{% endif %}</td>
+      <td class="petit">{% if sit.courant %}n° {{ sit.courant.id }} · {{ sit.courant.montant_ht | eur2 }}<div class="discret">{{ 'jusqu’au ' ~ (sit.courant.fin | date_fr) if sit.courant.fin else 'sans terme' }}</div>{% else %}<span class="negatif">aucun en cours</span>{% endif %}
+        {% if sit.suivant %}<div><span class="pastille ok">Suivant créé</span> au {{ sit.suivant.debut | date_fr }}</div>{% endif %}</td>
+      <td>{{ E.pastille(sit.gravite) }}{% for e in sit.ecarts if e.gravite != 'info' %}<div class="discret petit">{{ e.titre }}</div>{% endfor %}</td>
+      <td class="petit actions-bail"><a href="/baux/{{ b.id }}">Voir</a> · <a href="/baux/{{ b.id }}/modifier">Modifier</a>{% if sit.proposition and not sit.suivant %} · <a href="/baux/{{ b.id }}/abonnement">Abonnement</a>{% endif %}{% if sit.rappel and sit.rappel.echeances and not sit.rappel_facture %} · <a href="/baux/{{ b.id }}/rappel">Rappel</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="discret" style="margin: 0">Aucun bail. <a href="/dossiers/{{ a.dossier.code }}/baux/nouveau">Créer le premier bail</a>.</p>{% endif %}
+</details>
+{% else %}
+<div class="carte"><p class="discret" style="margin: 0">Aucun bail ne correspond{% if filtre or q %} : <a href="/baux">tout afficher</a>{% endif %}.</p></div>
+{% endfor %}
+<script>
+document.querySelectorAll('[data-tout]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var ouvrir = b.getAttribute('data-tout') === '1';
+    document.querySelectorAll('details.societe').forEach(function (d) { d.open = ouvrir; });
+  });
+});
+</script>
+{% endblock %}

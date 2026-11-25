@@ -377,6 +377,52 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
                 "retard": sum(1 for l in pilote if l["etat"] == "retard"),
                 "baux": sum(a["nb_baux"] for a in an)}))
 
+    FILTRES_BAUX = {"corriger": "À corriger", "regulariser": "À régulariser", "preparer": "Réindexations à préparer",
+                    "attente": "En attente d'indice"}
+
+    @app.get("/baux", response_class=HTMLResponse)
+    def page_baux(request: Request, filtre: str = "", q: str = "", horizon: int = 90):
+        """Tous les baux, regroupés par société. Les tuiles du haut filtrent ; la recherche porte sur la société,
+        le code du bail, le locataire et le local."""
+        horizon = min(max(horizon, 30), 730)
+        filtre = filtre if filtre in FILTRES_BAUX else ""
+        an = analyses()
+        pilote = pilotage(an, horizon)
+        pilotes = {l["bail"]["id"] for l in pilote}
+        etats: dict[int, set] = {}
+        for a in an:
+            for e in a["ecarts"]:
+                if e.bail_id is None or e.gravite == "info" or e.type == "IMPAYE" or (e.type == "RENOUVELLEMENT" and e.bail_id in pilotes):
+                    continue
+                etats.setdefault(e.bail_id, set()).add("corriger" if e.gravite == "bloquant" else "regulariser")
+        reindexation = {}
+        for l in pilote:
+            if l["etat"] == "a_faire":
+                etats.setdefault(l["bail"]["id"], set()).add("preparer")
+            elif l["etat"] in ("attente", "retard"):
+                etats.setdefault(l["bail"]["id"], set()).add("attente")
+            reindexation.setdefault(l["bail"]["id"], l)          # la plus urgente : le pilotage est trié
+        mot = q.strip().lower()
+        societes = []
+        for a in an:
+            d = a["dossier"]
+            lignes = []
+            for sit in a["situations"]:
+                b = sit.bail
+                if filtre and filtre not in etats.get(b["id"], set()):
+                    continue
+                if mot and not any(mot in str(x or "").lower() for x in (d["nom"], d["code"], b["code"], b.get("locataire"), b.get("local"))):
+                    continue
+                lignes.append({"sit": sit, "etats": etats.get(b["id"], set()), "reindexation": reindexation.get(b["id"]),
+                               "n": rp.ECHEANCES_PAR_AN.get(b.get("periodicite"), 12)})
+            if lignes or (not filtre and not mot):
+                societes.append({"a": a, "lignes": lignes,
+                                 "compte": {f: sum(1 for x in a["situations"] if f in etats.get(x.bail["id"], set())) for f in FILTRES_BAUX}})
+        compte = {f: sum(1 for v in etats.values() if f in v) for f in FILTRES_BAUX}
+        return gabarits.TemplateResponse(request, "baux.html", contexte(
+            request, page="baux", societes=societes, filtre=filtre, q=q, horizon=horizon, compte=compte, FILTRES=FILTRES_BAUX,
+            ouvert=bool(filtre or mot), nb_baux=sum(len(x["lignes"]) for x in societes)))
+
     @app.get("/ecarts", response_class=HTMLResponse)
     def ecarts(request: Request, gravite: str = "", type: str = "", dossier: str = ""):
         an = analyses()

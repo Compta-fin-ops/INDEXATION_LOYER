@@ -130,3 +130,18 @@ a.tuile { color: inherit; display: block; }
 a.tuile:hover { text-decoration: none; border-color: var(--marque); }
 
 pre.mention { white-space: pre-wrap; font-family: inherit; font-size: 13px; line-height: 1.5; margin: 0; }
+
+details.societe { padding: 0; }
+details.societe > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 14px 18px; }
+details.societe > summary::-webkit-details-marker { display: none; }
+details.societe > summary::before { content: "▸"; color: var(--discret); width: 10px; }
+details.societe[open] > summary::before { content: "▾"; }
+details.societe > summary .nom { flex: 1 1 260px; }
+details.societe > summary .liens { margin-left: auto; }
+details.societe > .defile, details.societe > p { padding: 0 18px 14px; }
+.tuile.choisie { outline: 2px solid var(--marque); }
+form.recherche { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 16px; }
+form.recherche input[type=search] { flex: 1 1 260px; max-width: 420px; }
+form.recherche .espace { flex: 1; }
+td.actions-bail { white-space: nowrap; }
+form.recherche input[type=search] { padding: 7px 10px; border: 1px solid var(--trait); border-radius: 8px; font: inherit; background: var(--carte); color: inherit; }

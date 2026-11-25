@@ -214,3 +214,25 @@ def test_reprise_d_un_classeur_d_indexation(tmp_path):
         assert b["loyer_attendu_annuel"] == pytest.approx(stocke[code]["loyer_attendu_annuel"], abs=0.005), code
     assert cx.execute("SELECT COUNT(*) AS n FROM decisions WHERE decision LIKE 'Geler%'").fetchone()["n"] >= 1
     assert cx.execute("SELECT variable_jeton FROM dossiers").fetchone()["variable_jeton"] == "PENNYLANE_TOKEN_EXEMPLE"
+
+
+def test_page_des_baux_par_societe_filtres_et_recherche(tmp_path):
+    """Tous les baux, regroupés par société ; les tuiles filtrent, la recherche réduit, les sociétés se déplient."""
+    chemin = tmp_path / "demo.sqlite"
+    simulation.charger_demo(db.connecter(chemin), AUJ)
+    c = client_connecte(creer_app(chemin, AUJ), chemin, "lecture")
+    page = c.get("/baux").text
+    nb = db.connecter(chemin).execute("SELECT COUNT(*) FROM baux").fetchone()[0]
+    assert f"{nb} bail/baux affiché(s)" in page and page.count('<details class="carte societe"') == 10
+    assert '<details class="carte societe" open' not in page                  # repliées par défaut
+    assert "Modifier la société" in page and "/baux/1/modifier" in page and 'href="/baux"' in page
+    corriger = c.get("/baux?filtre=corriger").text
+    compte = int(page.split('À corriger</div><div class="valeur">')[1].split("<")[0])
+    assert compte > 0 and f"{compte} bail/baux affiché(s)" in corriger and '<details class="carte societe" open' in corriger
+    assert "Bloquant" in corriger and "Conforme</span>" not in corriger
+    for f in ("regulariser", "preparer", "attente"):
+        assert c.get(f"/baux?filtre={f}").status_code == 200
+    assert c.get("/baux?filtre=nimporte").text.count('<details class="carte societe"') == 10      # filtre inconnu ignoré
+    recherche = c.get("/baux?q=halles").text
+    assert recherche.count('<details class="carte societe"') == 1 and "SCI des Halles" in recherche
+    assert "Aucun bail ne correspond" in c.get("/baux?q=zzzz-introuvable").text
