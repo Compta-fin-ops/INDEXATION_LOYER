@@ -15,7 +15,7 @@ brouillon. Il n'y a plus de classeur Excel dans le circuit.
                                    │
               rapprochement : écarts gradués, échéancier, abonnement proposé
                                    │
-     console web : tableau de bord, écarts, échéancier, indices, dossier, bail, pièces, courriers
+     console web : baux par société, écarts, échéancier, indices, dossier, bail, pièces, courriers
 ```
 
 ## Les baux dans la console
@@ -119,24 +119,23 @@ La base est désormais la source de vérité. `python -m console sauvegarder` en
 `data/sauvegardes`. Les pièces jointes sont des fichiers à part, dans le dossier `pieces` à côté de la base :
 les deux sont à sauvegarder, et aucun n'est versionné.
 
-## La page « Baux »
+## La page d'accueil : les baux par société
 
-Tous les baux, regroupés par société. Chaque société se déplie d'un clic, ou toutes à la fois. En tête, les
-quatre tuiles du tableau de bord servent de filtres : à corriger, à régulariser, réindexations à préparer, en
-attente d'indice. Un clic sur une tuile ne garde que les baux concernés et déplie leur société ; un second clic
-retire le filtre. La recherche porte sur la société, le code du bail, le locataire et le local. Chaque société
-porte ses liens (fiche, modifier la société, nouveau bail, situation PDF), chaque bail les siens (voir, modifier,
-préparer l'abonnement ou le rappel quand il y a lieu).
+La console s'ouvre sur la liste de tous les baux, regroupés par société. Chaque société se déplie d'un clic,
+ou toutes à la fois. Aucun total de loyers ni de chiffre d'affaires : seulement ce qui est à corriger et les
+réindexations à piloter.
 
-## Le tableau de bord
-
-Il sert à deux choses et ne montre rien d'autre : pas de total de loyers ni de chiffre d'affaires.
-
-| Bloc | Ce qu'il montre |
+| Filtre | Effet |
 |---|---|
-| Facturation à corriger | Les irrégularités, bloquantes d'abord : bail sans abonnement, abonnement arrivé à terme, révision non répercutée, échéance non facturée, abonnement à borner. Les impayés sont comptés à part, par un lien |
-| Réindexations à piloter | Les révisions échues sans indice, puis la prochaine révision de chaque bail dans l'horizon choisi. Pour chacune : l'indice attendu et s'il est publié, le loyer avant et après, le courrier, l'abonnement de la période suivante, et ce qu'il reste à faire |
-| Par dossier | Le nombre d'irrégularités, la prochaine réindexation et l'état de la lecture de Pennylane |
+| Les quatre tuiles | À corriger, à régulariser, réindexations à préparer (indice publié, sous 90 jours), en attente d'indice. Un clic filtre, un second retire le filtre |
+| Réindexation | Mois en cours, mois prochain, trimestre à venir (trois prochains mois), année civile en cours ou suivante, période personnalisée. Ne garde que les baux qui ont une réindexation dans la période, triés par date |
+| Indice | Publié, ou pas encore publié, pour la réindexation affichée |
+| Recherche | Société, code du bail, locataire, local |
+
+Les filtres se combinent, et les tuiles conservent les autres. Pour chaque bail, la colonne de réindexation
+donne la date, l'indice attendu, s'il est publié, le nouveau loyer et la variation, le courrier (à éditer ou
+envoyé le) et l'abonnement suivant (créé, ou à créer). Chaque société porte ses liens (fiche, modifier la
+société, nouveau bail, situation PDF), chaque bail les siens (voir, modifier, abonnement, rappel).
 
 Une réindexation passe par quatre états : « attendre l'indice », « indice attendu » si la date est dépassée,
 « à préparer » dès que l'indice est publié ou qu'un gel est décidé, « prête » quand le courrier est daté comme

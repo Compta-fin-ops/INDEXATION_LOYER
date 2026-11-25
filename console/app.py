@@ -17,7 +17,7 @@ import sqlite3
 import tempfile
 import urllib.parse
 import zipfile
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -350,42 +350,45 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         ordre = {"retard": 0, "a_faire": 1, "attente": 2, "faite": 3}
         return sorted(lignes, key=lambda l: (ordre[l["etat"]], l["date"]))
 
-    @app.get("/", response_class=HTMLResponse)
-    def tableau_de_bord(request: Request, horizon: int = 90):
-        horizon = min(max(horizon, 30), 730)
-        an = analyses()
-        ordre = {g: i for i, g in enumerate(rp.GRAVITES)}
-        pilote = pilotage(an, horizon)
-        pilotes = {l["bail"]["id"] for l in pilote}     # leur abonnement suivant se traite dans le tableau des réindexations
-        a_corriger = sorted((e for a in an for e in a["ecarts"] if e.gravite != "info" and e.type != "IMPAYE"
-                             and not (e.type == "RENOUVELLEMENT" and e.bail_id in pilotes)),
-                            key=lambda e: (ordre[e.gravite], -abs(e.montant)))
-        impayes = [e for a in an for e in a["ecarts"] if e.type == "IMPAYE"]
-        prochaine = {}
-        for l in pilote:
-            code = l["dossier"]["code"]
-            if l["date"] > jour() and (code not in prochaine or l["date"] < prochaine[code]):
-                prochaine[code] = l["date"]
-        noms = {a["dossier"]["code"]: a["dossier"]["nom"] for a in an}
-        return gabarits.TemplateResponse(request, "tableau_de_bord.html", contexte(
-            request, page="bord", analyses=an, noms=noms, horizon=horizon, pilote=pilote, prochaine=prochaine,
-            a_corriger=a_corriger[:15], nb_corriger=len(a_corriger), impayes=impayes,
-            nb={"bloquant": sum(1 for e in a_corriger if e.gravite == "bloquant"),
-                "a_traiter": sum(1 for e in a_corriger if e.gravite == "a_traiter"),
-                "a_faire": sum(1 for l in pilote if l["etat"] == "a_faire"),
-                "attente": sum(1 for l in pilote if l["etat"] == "attente"),
-                "retard": sum(1 for l in pilote if l["etat"] == "retard"),
-                "baux": sum(a["nb_baux"] for a in an)}))
-
     FILTRES_BAUX = {"corriger": "À corriger", "regulariser": "À régulariser", "preparer": "Réindexations à préparer",
                     "attente": "En attente d'indice"}
 
+    PERIODES = {"mois": "Mois en cours", "mois_suivant": "Mois prochain", "trimestre": "Trimestre à venir (3 prochains mois)",
+                "annee": "Année civile en cours", "annee_suivante": "Année civile suivante", "perso": "Période personnalisée"}
+    INDICES_DISPO = {"publie": "Indice publié", "attendu": "Indice pas encore publié"}
+
+    def bornes(periode: str, du: str, au: str) -> tuple[date | None, date | None]:
+        j = jour()
+        debut_mois = date(j.year, j.month, 1)
+        if periode == "mois":
+            return debut_mois, rp.ajouter_mois(debut_mois, 1) - timedelta(days=1)
+        if periode == "mois_suivant":
+            return rp.ajouter_mois(debut_mois, 1), rp.ajouter_mois(debut_mois, 2) - timedelta(days=1)
+        if periode == "trimestre":
+            return j, rp.ajouter_mois(j, 3)
+        if periode == "annee":
+            return date(j.year, 1, 1), date(j.year, 12, 31)
+        if periode == "annee_suivante":
+            return date(j.year + 1, 1, 1), date(j.year + 1, 12, 31)
+        if periode == "perso":
+            lire = lambda v: date.fromisoformat(v) if v else None
+            try:
+                return lire(du), lire(au)
+            except ValueError:
+                return None, None
+        return None, None
+
+    @app.get("/", response_class=HTMLResponse)
     @app.get("/baux", response_class=HTMLResponse)
-    def page_baux(request: Request, filtre: str = "", q: str = "", horizon: int = 90):
-        """Tous les baux, regroupés par société. Les tuiles du haut filtrent ; la recherche porte sur la société,
-        le code du bail, le locataire et le local."""
+    def page_baux(request: Request, filtre: str = "", q: str = "", periode: str = "", du: str = "", au: str = "", indice: str = "",
+                  horizon: int = 90):
+        """Page d'accueil : tous les baux, regroupés par société. Les tuiles filtrent par situation ; la date de
+        réindexation, la disponibilité de l'indice et la recherche (société, bail, locataire, local) se combinent."""
         horizon = min(max(horizon, 30), 730)
         filtre = filtre if filtre in FILTRES_BAUX else ""
+        periode = periode if periode in PERIODES else ""
+        indice = indice if indice in INDICES_DISPO else ""
+        debut, fin = bornes(periode, du, au)
         an = analyses()
         pilote = pilotage(an, horizon)
         pilotes = {l["bail"]["id"] for l in pilote}
@@ -395,33 +398,89 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
                 if e.bail_id is None or e.gravite == "info" or e.type == "IMPAYE" or (e.type == "RENOUVELLEMENT" and e.bail_id in pilotes):
                     continue
                 etats.setdefault(e.bail_id, set()).add("corriger" if e.gravite == "bloquant" else "regulariser")
-        reindexation = {}
         for l in pilote:
             if l["etat"] == "a_faire":
                 etats.setdefault(l["bail"]["id"], set()).add("preparer")
             elif l["etat"] in ("attente", "retard"):
                 etats.setdefault(l["bail"]["id"], set()).add("attente")
-            reindexation.setdefault(l["bail"]["id"], l)          # la plus urgente : le pilotage est trié
+        table = table_indices()
+
+        def reindexation(sit) -> dict | None:
+            """La réindexation à montrer : celle de la période choisie ; sans période, une révision échue dont l'indice
+            manque, sinon la prochaine."""
+            b = sit.bail
+            if not (b.get("calcule") and b.get("date_effet")):
+                return reindexation_importee(sit)
+            dec = referentiel.decisions_du_bail(cx, b["id"])
+            _, revs = referentiel.reviser(b, table, {n: d["decision"] for n, d in dec.items()}, jour())
+            if debut or fin:
+                l = next((x for x in revs if (debut is None or x.echeance.date_revision >= debut)
+                          and (fin is None or x.echeance.date_revision <= fin)), None)
+            else:
+                l = next((x for x in revs if x.statut == calcul.STATUT_ATTENDU), None) or next(
+                    (x for x in revs if x.echeance.date_revision > jour()), None)
+            if l is None:
+                return None
+            d = dec.get(l.echeance.numero, {})
+            suivant = rp._d(sit.suivant.get("debut")) if sit.suivant else None
+            return {"date": l.echeance.date_revision, "jours": (l.echeance.date_revision - jour()).days, "numero": l.echeance.numero,
+                    "indice": f"{b['indice']} {l.echeance.trimestre_reference.replace('-', ' ')}", "publie": l.indice_reference is not None,
+                    "gel": est_gel(l.decision), "avant": l.loyer_precedent, "apres": l.loyer_retenu, "variation": l.variation_pct,
+                    "courrier_le": d.get("courrier_le"), "courrier": l.loyer_precedent is not None and l.statut != calcul.STATUT_A_VENIR,
+                    "abonnement_pret": suivant is not None and suivant >= l.echeance.date_revision}
+
+        def reindexation_importee(sit) -> dict | None:
+            """Bail aux valeurs importées, sans paramètres de calcul : on s'en tient aux dates et au loyer importés."""
+            b = sit.bail
+            candidates = [(rp._d(b.get("date_derniere_revision")), True), (rp._d(b.get("date_prochaine_revision")), False)]
+            if debut or fin:
+                choix = next(((d, passee) for d, passee in candidates if d and (debut is None or d >= debut) and (fin is None or d <= fin)), None)
+            else:
+                choix = (candidates[1] if candidates[1][0] else None)
+            if choix is None:
+                return None
+            d, passee = choix
+            publie = passee and not (b.get("statut_revision") or "").startswith("⚠") or (not passee and b.get("loyer_prochain_annuel") is not None)
+            return {"date": d, "jours": (d - jour()).days, "numero": None, "indice": b.get("indice") or "", "publie": publie,
+                    "gel": (b.get("statut_revision") or "").startswith("❄") and passee,
+                    "avant": None, "apres": b.get("loyer_attendu_annuel") if passee else b.get("loyer_prochain_annuel"),
+                    "variation": None, "courrier_le": None, "courrier": False,
+                    "abonnement_pret": sit.suivant is not None}
+
         mot = q.strip().lower()
         societes = []
         for a in an:
-            d = a["dossier"]
+            dsr = a["dossier"]
             lignes = []
             for sit in a["situations"]:
                 b = sit.bail
                 if filtre and filtre not in etats.get(b["id"], set()):
                     continue
-                if mot and not any(mot in str(x or "").lower() for x in (d["nom"], d["code"], b["code"], b.get("locataire"), b.get("local"))):
+                if mot and not any(mot in str(x or "").lower() for x in (dsr["nom"], dsr["code"], b["code"], b.get("locataire"), b.get("local"))):
                     continue
-                lignes.append({"sit": sit, "etats": etats.get(b["id"], set()), "reindexation": reindexation.get(b["id"]),
-                               "n": rp.ECHEANCES_PAR_AN.get(b.get("periodicite"), 12)})
-            if lignes or (not filtre and not mot):
+                r = reindexation(sit)
+                if (debut or fin or indice) and r is None:
+                    continue
+                if indice and (r["publie"] or r["gel"]) != (indice == "publie"):
+                    continue
+                lignes.append({"sit": sit, "etats": etats.get(b["id"], set()), "r": r, "n": rp.ECHEANCES_PAR_AN.get(b.get("periodicite"), 12)})
+            if debut or fin:
+                lignes.sort(key=lambda x: x["r"]["date"])
+            if lignes or not (filtre or mot or periode or indice):
                 societes.append({"a": a, "lignes": lignes,
                                  "compte": {f: sum(1 for x in a["situations"] if f in etats.get(x.bail["id"], set())) for f in FILTRES_BAUX}})
         compte = {f: sum(1 for v in etats.values() if f in v) for f in FILTRES_BAUX}
+        params = {k: v for k, v in (("filtre", filtre), ("q", q), ("periode", periode), ("indice", indice),
+                                    ("du", du if periode == "perso" else ""), ("au", au if periode == "perso" else "")) if v}
+
+        def lien(**changes) -> str:
+            p = {**params, **changes}
+            return "/?" + urllib.parse.urlencode({k: v for k, v in p.items() if v})
+
         return gabarits.TemplateResponse(request, "baux.html", contexte(
             request, page="baux", societes=societes, filtre=filtre, q=q, horizon=horizon, compte=compte, FILTRES=FILTRES_BAUX,
-            ouvert=bool(filtre or mot), nb_baux=sum(len(x["lignes"]) for x in societes)))
+            PERIODES=PERIODES, INDICES_DISPO=INDICES_DISPO, periode=periode, du=du, au=au, indice=indice, debut=debut, fin=fin,
+            lien=lien, params=params, ouvert=bool(params), nb_baux=sum(len(x["lignes"]) for x in societes)))
 
     @app.get("/ecarts", response_class=HTMLResponse)
     def ecarts(request: Request, gravite: str = "", type: str = "", dossier: str = ""):

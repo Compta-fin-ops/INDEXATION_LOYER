@@ -225,7 +225,7 @@ def test_page_des_baux_par_societe_filtres_et_recherche(tmp_path):
     nb = db.connecter(chemin).execute("SELECT COUNT(*) FROM baux").fetchone()[0]
     assert f"{nb} bail/baux affiché(s)" in page and page.count('<details class="carte societe"') == 10
     assert '<details class="carte societe" open' not in page                  # repliées par défaut
-    assert "Modifier la société" in page and "/baux/1/modifier" in page and 'href="/baux"' in page
+    assert "Modifier la société" in page and "/baux/1/modifier" in page and c.get("/").text.count('<details class="carte societe"') == 10
     corriger = c.get("/baux?filtre=corriger").text
     compte = int(page.split('À corriger</div><div class="valeur">')[1].split("<")[0])
     assert compte > 0 and f"{compte} bail/baux affiché(s)" in corriger and '<details class="carte societe" open' in corriger
@@ -236,6 +236,22 @@ def test_page_des_baux_par_societe_filtres_et_recherche(tmp_path):
     recherche = c.get("/baux?q=halles").text
     assert recherche.count('<details class="carte societe"') == 1 and "SCI des Halles" in recherche
     assert "Aucun bail ne correspond" in c.get("/baux?q=zzzz-introuvable").text
+    # réindexation dans la période choisie, et disponibilité de son indice
+    annee = c.get("/?periode=annee").text
+    n_annee = int(annee.split(" bail/baux affiché(s)")[0].rsplit(">", 1)[1])
+    assert 0 < n_annee < nb and "Réindexations du 01/01/2026 au 31/12/2026" in annee and "Réindexation de la période" in annee
+    mois = c.get("/?periode=mois").text
+    assert "du 01/11/2026 au 30/11/2026" in mois
+    publie = c.get("/?periode=annee&indice=publie").text
+    attendu = c.get("/?periode=annee&indice=attendu").text
+    n = lambda page: int(page.split(" bail/baux affiché(s)")[0].rsplit(">", 1)[1])
+    assert n(publie) + n(attendu) == n_annee and "Indice attendu</span>" not in publie
+    perso = c.get("/?periode=perso&du=2027-01-01&au=2027-03-31").text
+    assert "du 01/01/2027 au 31/03/2027" in perso and 'name="du" value="2027-01-01"' in perso
+    assert c.get("/?periode=perso&du=pas-une-date").status_code == 200            # date illisible : filtre ignoré
+    # les filtres se combinent, et les tuiles les conservent
+    combine = c.get("/?filtre=preparer&periode=trimestre&indice=publie").text
+    assert "periode=trimestre" in combine.split('class="tuiles"')[1].split("</div>\n</div>")[0]
 
 
 def test_controles_d_enchainement_client_tva_mode_et_sortie():

@@ -61,7 +61,8 @@ def utilisateur() -> str:
 def lire_indices(chemin: Path | None = None) -> list[insee.Observation]:
     """Indices INSEE du cache du dépôt, relus seulement quand le fichier change."""
     chemin = Path(chemin or insee.CHEMIN_CACHE)
-    marque = chemin.stat().st_mtime_ns if chemin.exists() else None
+    etat = chemin.stat() if chemin.exists() else None
+    marque = (etat.st_mtime_ns, etat.st_size) if etat else None          # un fichier réécrit dans la même seconde change de taille
     cle = str(chemin)
     if _cache_indices.get(cle, (None,))[0] != marque:
         _cache_indices[cle] = (marque, insee.lire_cache(chemin))

@@ -145,3 +145,6 @@ form.recherche input[type=search] { flex: 1 1 260px; max-width: 420px; }
 form.recherche .espace { flex: 1; }
 td.actions-bail { white-space: nowrap; }
 form.recherche input[type=search] { padding: 7px 10px; border: 1px solid var(--trait); border-radius: 8px; font: inherit; background: var(--carte); color: inherit; }
+form.recherche label.choix { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--discret); }
+form.recherche select, form.recherche input[type=date] { padding: 6px 8px; border: 1px solid var(--trait); border-radius: 8px; font: inherit; background: var(--carte); color: inherit; }
+form.recherche .perso[hidden] { display: none; }

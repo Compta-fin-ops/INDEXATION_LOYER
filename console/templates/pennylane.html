@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block titre %}Pennylane · {{ d.nom }} · Console des loyers{% endblock %}
 {% block contenu %}
-<div class="fil"><a href="/">Tableau de bord</a> / <a href="/dossiers/{{ d.code }}">{{ d.nom }}</a> / Raccordement Pennylane</div>
+<div class="fil"><a href="/">Baux</a> / <a href="/dossiers/{{ d.code }}">{{ d.nom }}</a> / Raccordement Pennylane</div>
 <h1>Raccordement de {{ d.nom }} à Pennylane</h1>
 <p class="sous-titre">Le jeton donne à la console le droit de lire ce dossier dans Pennylane. Il se génère dans Pennylane : « Paramètres entreprise », « Connectivité », onglet « Développeurs ».</p>
 {% if erreur %}<div class="bandeau erreur">{{ erreur }}</div>{% endif %}

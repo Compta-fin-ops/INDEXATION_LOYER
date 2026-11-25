@@ -365,33 +365,30 @@ def test_reprise_d_un_bail_en_cours(console, indices):
     assert "25 367,70" in c.get(r.headers["location"]).text
 
 
-def test_tableau_de_bord_pilote_les_reindexations(console, indices):
-    """Le tableau de bord suit chaque réindexation : attente de l'indice, à préparer, prête. Aucun total de loyers."""
+def test_accueil_suit_chaque_reindexation(console, indices):
+    """La page d'accueil (baux par société) suit la réindexation : indice attendu, publié, courrier, abonnement suivant."""
     c, cx, bail_id, _ = console
     accueil = c.get("/").text
-    assert "Pilotage des loyers" in accueil and "Loyers facturés" not in accueil and "Loyers attendus" not in accueil
-    assert "Aucune réindexation sous 90 jours" in accueil                        # la prochaine est au 01/04/2027, dans 130 jours
-    page = c.get("/?horizon=180").text
-    assert "ILC 2026-T4" in page and "Attendre l'indice" in page
-    # l'indice paraît : la révision passe « à préparer », avec le loyer révisé, le courrier à éditer et l'abonnement à créer
+    assert "Baux par société" in accueil and "Tableau de bord" not in accueil and "Loyers facturés" not in accueil
+    page = c.get("/?periode=annee_suivante").text
+    assert "01/04/2027" in page and "ILC 2026 T4" in page and "Indice attendu" in page
+    assert "Aucun bail ne correspond" in c.get("/?periode=annee_suivante&indice=publie").text
+    # l'indice paraît : nouveau loyer, courrier à éditer, abonnement à créer
     insee.ecrire_cache([insee.Observation("ILC", "001532540", t, v, "A", "2026-12-20", "TEST", "2026-12-21")
                         for t, v in {**ILC, "2026-T4": 139.00}.items()], indices)
-    page = c.get("/?horizon=180").text
-    assert "À préparer" in page and "26 465,70" in page                      # 26 140,11 × 139,00 / 137,29
-    assert f'/baux/{bail_id}/revisions/4/courrier.pdf' in page and f'/baux/{bail_id}/abonnement' in page
-    # courrier daté comme envoyé, abonnement de la période suivante présent dans Pennylane : « prête »
+    page = c.get("/?periode=annee_suivante&indice=publie").text
+    assert "Indice publié" in page and "26\u202f465,70" in page                     # 26 140,11 × 139,00 / 137,29
+    assert f'/baux/{bail_id}/revisions/4/courrier.pdf' in page and "Abonnement suivant à créer" in page
     c.post(f"/baux/{bail_id}/revisions/4", data={"decision": "Appliquer", "courrier_le": "2026-12-22"})
-    assert "À préparer" in c.get("/?horizon=180").text                            # il manque encore l'abonnement
     for ident, debut, fin, statut in ((801, "2026-04-01", "2027-03-01", "in_progress"), (802, "2027-04-01", "2028-03-01", "not_started")):
         cx.execute("""INSERT INTO abonnements (id, dossier, customer_id, label, statut, mode, debut, fin, type_regle, intervalle, montant_ht)
                       VALUES (?, 'HALLES', 4242, 'Loyer', ?, 'awaiting_validation', ?, ?, 'monthly', 1, 2278.34)""", (ident, statut, debut, fin))
     cx.commit()
-    page = c.get("/?horizon=180").text
-    assert "Prête" in page and "envoyé le 22/12/2026" in page and "À préparer" not in page
-    # une révision gelée ne demande que le courrier
+    page = c.get("/?periode=annee_suivante").text
+    assert "courrier envoyé le 22/12/2026" in page and "Suivant créé" in page and "Abonnement suivant à créer" not in page
+    # une révision gelée
     c.post(f"/baux/{bail_id}/revisions/4", data={"decision": "Geler – sans rattrapage", "commentaire": "accord 2027"})
-    page = c.get("/?horizon=180").text
-    assert "Gel décidé" in page and "À préparer" in page and "accord 2027" in page
+    assert "Gel décidé" in c.get("/?periode=annee_suivante").text
 
 
 def test_courriers_en_lot_et_etat_annuel(console, indices):

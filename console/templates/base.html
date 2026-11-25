@@ -11,8 +11,7 @@
 <header class="entete"><div class="entete-int">
   <a class="marque" href="/">Console des loyers{% if environnement == 'test' %} <span class="pastille test">TEST</span>{% endif %}</a>
   {% if utilisateur %}<nav>
-    <a href="/" class="{{ 'actif' if page == 'bord' }}">Tableau de bord</a>
-    <a href="/baux" class="{{ 'actif' if page == 'baux' }}">Baux</a>
+    <a href="/" class="{{ 'actif' if page in ('baux', 'bord') }}">Baux</a>
     <a href="/ecarts" class="{{ 'actif' if page == 'ecarts' }}">Écarts</a>
     <a href="/echeancier" class="{{ 'actif' if page == 'echeancier' }}">Échéancier</a>
     <a href="/indices" class="{{ 'actif' if page == 'indices' }}">Indices</a>
