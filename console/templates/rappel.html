@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block titre %}Facture de rappel · {{ sit.bail.code }} · Console des loyers{% endblock %}
+{% block contenu %}
+<div class="fil"><a href="/">Tableau de bord</a> / <a href="/dossiers/{{ a.dossier.code }}">{{ a.dossier.nom }}</a> / <a href="/baux/{{ sit.bail.id }}">{{ sit.bail.code }}</a> / Facture de rappel</div>
+<h1>Facture de rappel de {{ sit.bail.locataire }}</h1>
+<p class="sous-titre">Bail {{ sit.bail.code }} · {{ sit.bail.local }} · {{ a.dossier.nom }}</p>
+{% if erreur %}<div class="bandeau erreur">{{ erreur }}</div>{% endif %}
+<div class="deux">
+  <div class="carte">
+    <h2>Ce qui sera créé</h2>
+    {% if prop %}
+    <dl class="fiche">
+      <dt>Nature</dt><dd>Facture client en brouillon</dd>
+      <dt>Révision concernée</dt><dd>{{ prop.date_revision | date_fr }}</dd>
+      <dt>Échéances rappelées</dt><dd>{{ prop.echeances }}{% if prop.du %}, du {{ prop.du | date_fr }} au {{ prop.au | date_fr }}{% endif %}</dd>
+      <dt>Écart par échéance</dt><dd>{{ prop.ecart_par_echeance | eur2 }} HT</dd>
+      <dt>Montant du rappel</dt><dd>{{ prop.montant_ht | eur2 }} HT</dd>
+      <dt>Client Pennylane</dt><dd>{{ prop.corps.customer_id or '—' }}</dd>
+      <dt>Référence</dt><dd>{{ prop.reference }}</dd>
+    </dl>
+    <p class="petit" style="margin: 12px 0 0"><span class="fort">Ce que la console ne fait pas :</span> elle ne finalise pas la facture, ne l'envoie pas, et ne modifie aucune facture existante. Le brouillon se relit, se corrige et se valide dans Pennylane ; il peut aussi y être supprimé.</p>
+    {% else %}<p class="discret" style="margin: 0">Aucun rappel à facturer pour ce bail : il faut un abonnement en cours resté à l'ancien loyer après une révision.</p>{% endif %}
+  </div>
+  <div class="carte">
+    <h2>Contrôles préalables</h2>
+    <ul class="controles">
+    {% for c in controles %}
+      <li class="{{ 'passe' if c.ok else ('echec' if c.bloquant else 'avert') }}">
+        <span class="marqueur">{{ '✔' if c.ok else ('✖' if c.bloquant else '!') }}</span>
+        <span><span class="fort">{{ c.libelle }}</span>{% if c.detail %}<br><span class="discret petit">{{ c.detail }}</span>{% endif %}</span>
+      </li>
+    {% endfor %}
+    </ul>
+  </div>
+</div>
+{% if prop %}
+<div class="carte">
+  <h2>Corps exact de la requête</h2>
+  <pre>POST /api/external/v2/customer_invoices
+{{ corps }}</pre>
+  <p class="discret petit" style="margin: 8px 0 0">Empreinte {{ empreinte[:16] }}… Si la situation change entre l'affichage et la confirmation, l'envoi est refusé.</p>
+</div>
+{% endif %}
+<div class="carte">
+  <h2>Confirmation</h2>
+  {% if possible %}
+  <form method="post" action="/baux/{{ sit.bail.id }}/rappel" class="confirmation">
+    <input type="hidden" name="empreinte" value="{{ empreinte }}">
+    <label>Pour confirmer, saisir le code du bail <span class="fort">{{ sit.bail.code }}</span>
+      <input type="text" name="confirmation" autocomplete="off" required></label>
+    <button type="submit" class="principal">{{ 'Simuler la création' if sans_appel else 'Créer le brouillon dans Pennylane' }}</button>
+    <a href="/baux/{{ sit.bail.id }}">Annuler</a>
+  </form>
+  {% else %}
+  <p class="negatif" style="margin: 0">Création impossible : au moins un contrôle bloquant est en échec. Corriger la cause, puis actualiser.</p>
+  <p style="margin: 10px 0 0"><a href="/baux/{{ sit.bail.id }}">Revenir au bail</a></p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -349,6 +349,44 @@ def proposer_abonnement(bail: dict, courant: dict | None, aujourdhui: date, regl
 
 
 # ---------------------------------------------------------------------------
+# Facture de rappel : le loyer dû depuis la révision et facturé à l'ancien prix
+# ---------------------------------------------------------------------------
+def proposer_facture_rappel(bail: dict, courant: dict | None, aujourdhui: date) -> dict | None:
+    """Corps de POST /customer_invoices, en brouillon, pour le rappel de loyer d'une révision non répercutée.
+
+    Le rappel couvre toutes les échéances de l'abonnement en cours depuis la date de révision jusqu'à son
+    terme : il n'est complet que si cet abonnement est borné. None s'il n'y a ni abonnement ni révision."""
+    derniere, debut = _d(bail.get("date_derniere_revision")), _d(courant.get("debut")) if courant else None
+    if courant is None or derniere is None or debut is None:
+        return None
+    fin = _d(courant.get("fin"))
+    pas, d, dates = _pas_mois(courant), debut, []
+    while d <= (fin or aujourdhui):
+        if d >= derniere:
+            dates.append(d)
+        d = ajouter_mois(d, pas)
+    ecart = round(_attendu_echeance(bail) - (courant.get("montant_ht") or 0), 2)
+    periodicite = bail.get("periodicite") or "Mensuelle"
+    taux = bail.get("tva_pct")
+    tva = CODES_TVA.get(float(taux) if taux is not None else 20.0)
+    reference = f"console-{bail['dossier']}-{bail['code']}-rappel-{derniere.isoformat()}"
+    periode = (f"échéances du {_fr(dates[0])} au {_fr(dates[-1])}" if len(dates) > 1 else f"échéance du {_fr(dates[0])}") if dates else ""
+    corps = {
+        "date": aujourdhui.isoformat(), "deadline": aujourdhui.isoformat(), "customer_id": bail.get("customer_id"),
+        "draft": True, "currency": "EUR", "language": "fr_FR", "external_reference": reference,
+        "pdf_invoice_subject": f"Rappel de loyer – {bail.get('local', '')}",
+        "special_mention": (f"Rappel de loyer consécutif à la révision du {_fr(derniere)}, indexée sur l'{bail.get('indice', '')} : "
+                            f"{periode}, soit {len(dates)} échéance(s) à {_eur(ecart)} hors taxes."),
+        "invoice_lines": [{"label": f"Rappel de loyer, révision du {_fr(derniere)} – {periode}", "quantity": len(dates),
+                           "unit": UNITE.get(periodicite, "mois"), "raw_currency_unit_price": f"{ecart:.2f}", "vat_rate": tva}],
+    }
+    return {"corps": corps, "reference": reference, "date_revision": derniere.isoformat(), "echeances": len(dates),
+            "du": dates[0].isoformat() if dates else None, "au": dates[-1].isoformat() if dates else None,
+            "ecart_par_echeance": ecart, "montant_ht": round(len(dates) * ecart, 2), "borne": fin is not None,
+            "tva_connue": tva is not None, "debut": f"rappel-{derniere.isoformat()}"}
+
+
+# ---------------------------------------------------------------------------
 # Analyse d'un dossier et synthèses
 # ---------------------------------------------------------------------------
 def analyser_dossier(dossier: dict, baux: list[dict], abonnements: list[dict], factures: list[dict],

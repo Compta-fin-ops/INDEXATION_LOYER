@@ -103,7 +103,7 @@
   <h2>Abonnement proposé pour la période suivante</h2>
   <p class="petit" style="margin: 0">À partir du <span class="fort">{{ sit.proposition.debut | date_fr }}</span>{% if sit.proposition.occurrences %}, <span class="fort">{{ sit.proposition.occurrences }} occurrence(s)</span>, la dernière le {{ sit.proposition.derniere_occurrence | date_fr }}{% endif %}. {{ sit.proposition.note }}.
   {% if not sit.proposition.envoyable %}<span class="negatif">Client Pennylane manquant : non envoyable.</span>{% endif %}</p>
-  {% if sit.rappel and sit.rappel.echeances %}<p class="petit" style="margin: 8px 0 0"><span class="pastille a_traiter">Rappel de loyer</span> {{ sit.rappel.montant | eur2 }} HT à facturer séparément : {{ sit.rappel.echeances }} échéance(s) facturée(s) à l'ancien loyer depuis le {{ sit.rappel.depuis | date_fr }}, soit {{ sit.rappel.ecart_par_echeance | eur2 }} par échéance.</p>{% endif %}
+  {% if sit.rappel and sit.rappel.echeances %}<p class="petit" style="margin: 8px 0 0"><span class="pastille a_traiter">Rappel de loyer</span> {{ sit.rappel.montant | eur2 }} HT à facturer séparément : {{ sit.rappel.echeances }} échéance(s) facturée(s) à l'ancien loyer depuis le {{ sit.rappel.depuis | date_fr }}, soit {{ sit.rappel.ecart_par_echeance | eur2 }} par échéance. <a href="/baux/{{ sit.bail.id }}/rappel">Préparer la facture de rappel en brouillon</a></p>{% endif %}
   <pre>POST /api/external/v2/billing_subscriptions
 {{ corps }}</pre>
   <p style="margin: 12px 0 0"><a class="bouton" href="/baux/{{ sit.bail.id }}/abonnement">Préparer la création dans Pennylane</a>

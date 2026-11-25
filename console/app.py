@@ -85,7 +85,7 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
             return "administrateur"                      # comptes, et dépôt ou retrait d'un jeton Pennylane
         if methode in ("GET", "HEAD", "OPTIONS") or chemin in ("/compte", "/deconnexion"):
             return "lecture"
-        if chemin.endswith("/abonnement"):               # création d'un abonnement dans Pennylane
+        if chemin.endswith(("/abonnement", "/rappel")):  # création d'un abonnement ou d'une facture dans Pennylane
             return "validation"
         return "gestion"
 
@@ -944,6 +944,70 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
                 ecriture.clore_envoi(cx, envoi_id, "refusé", None, None, "", str(exc))
                 return page_creation(request, bail_id, str(exc), 403)
             ecriture.clore_envoi(cx, envoi_id, etat, http, (reponse or {}).get("id"), (reponse or {}).get("status", ""), brut)
+            if etat == "créé":
+                collecter(sit.bail["dossier"])
+        return RedirectResponse(f"/envois/{envoi_id}", status_code=303)
+
+    # ------------------------------------------------ facture de rappel, en brouillon
+    def preparer_rappel(bail_id: int):
+        """(analyse du dossier, situation du bail, proposition de facture, contrôles, simulation ?)."""
+        from .pennylane_api import ClientReel
+        a = analyses(ligne_bail(bail_id)["dossier"])[0]
+        sit = next(x for x in a["situations"] if x.bail["id"] == bail_id)
+        code = a["dossier"]["code"]
+        simule = sans_appel(code)
+        prop = rp.proposer_facture_rappel(sit.bail, sit.courant, jour()) if sit.rappel else None
+        existe = None
+        if prop and not simule:                          # lecture : cette référence est-elle déjà dans Pennylane ?
+            try:
+                existe = ClientReel({code: a["dossier"]["variable_jeton"]}).facture_existe(code, prop["reference"])
+            except RuntimeError:
+                existe = None
+        controles = ecriture.controler_rappel(sit, prop, a["dossier"], ecriture.journal(cx, code), simule, existe)
+        return a, sit, prop, controles, simule
+
+    def page_rappel(request: Request, bail_id: int, erreur: str = "", statut: int = 200):
+        a, sit, prop, controles, simule = preparer_rappel(bail_id)
+        return gabarits.TemplateResponse(request, "rappel.html", contexte(
+            request, page="bord", a=a, sit=sit, prop=prop, controles=controles, erreur=erreur, sans_appel=simule,
+            possible=prop is not None and ecriture.envoi_possible(controles),
+            empreinte=ecriture.empreinte(prop["corps"]) if prop else "",
+            corps=json.dumps(prop["corps"], ensure_ascii=False, indent=2) if prop else ""), status_code=statut)
+
+    @app.get("/baux/{bail_id}/rappel", response_class=HTMLResponse)
+    def rappel(request: Request, bail_id: int):
+        return page_rappel(request, bail_id)
+
+    @app.post("/baux/{bail_id}/rappel")
+    async def rappel_creer(request: Request, bail_id: int):
+        champs = await formulaire(request)
+        code_dossier = ligne_bail(bail_id)["dossier"]
+        if not sans_appel(code_dossier):                 # relecture de Pennylane juste avant d'écrire
+            if not all(x["ok"] for x in collecter(code_dossier)):
+                return page_rappel(request, bail_id, "Relecture de Pennylane impossible : aucun envoi sans état à jour.", 409)
+        a, sit, prop, controles, simule = preparer_rappel(bail_id)
+        if prop is None or champs.get("empreinte") != ecriture.empreinte(prop["corps"]):
+            return page_rappel(request, bail_id, "La situation a changé depuis l'affichage : relire la proposition ci-dessous avant de confirmer.", 409)
+        if champs.get("confirmation", "").strip().upper() != sit.bail["code"].upper():
+            return page_rappel(request, bail_id, f"Confirmation incorrecte : saisir le code du bail, {sit.bail['code']}.", 400)
+        if not ecriture.envoi_possible(controles):
+            return page_rappel(request, bail_id, "Envoi refusé : au moins un contrôle bloquant est en échec.", 409)
+        corps = prop["corps"]
+        envoi_id = ecriture.ouvrir_envoi(cx, sit.bail, prop, corps, "simulation" if simule else "pennylane", nature="facture")
+        if simule:
+            ttc = round(prop["montant_ht"] * (1 + (sit.bail.get("tva_pct") or 0) / 100), 2)
+            cx.execute("""INSERT INTO factures (id, dossier, customer_id, subscription_id, numero, libelle, date, echeance,
+                          montant_ht, montant_ttc, restant_du, statut) VALUES (?,?,?,NULL,'',?,?,?,?,?,?,'draft')""",
+                       (900000 + envoi_id, sit.bail["dossier"], corps["customer_id"], corps["pdf_invoice_subject"], corps["date"],
+                        corps["deadline"], prop["montant_ht"], ttc, ttc))
+            ecriture.clore_envoi(cx, envoi_id, "créé", 201, None, "draft", "Envoi simulé : aucun appel à Pennylane.", facture_id=900000 + envoi_id)
+        else:
+            try:
+                etat, http, reponse, brut = ecriture.creer_facture_dans_pennylane(a["dossier"], corps)
+            except PermissionError as exc:
+                ecriture.clore_envoi(cx, envoi_id, "refusé", None, None, "", str(exc))
+                return page_rappel(request, bail_id, str(exc), 403)
+            ecriture.clore_envoi(cx, envoi_id, etat, http, None, (reponse or {}).get("status", ""), brut, facture_id=(reponse or {}).get("id"))
             if etat == "créé":
                 collecter(sit.bail["dossier"])
         return RedirectResponse(f"/envois/{envoi_id}", status_code=303)

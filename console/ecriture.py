@@ -1,20 +1,22 @@
-"""Création d'un abonnement dans Pennylane : la SEULE écriture de la console.
+"""Les deux seules écritures de la console dans Pennylane : créer un abonnement, créer une facture en brouillon.
 
 Règle de construction : ne rien faire qui puisse mettre des données en danger.
-  - La console ne contient aucun code de modification, d'arrêt ni de suppression. Elle ne sait
-    que CRÉER un abonnement nouveau ; les données existantes de Pennylane ne sont jamais touchées.
-  - L'écriture est désactivée par défaut. Elle exige la variable CONSOLE_ECRITURE=oui ET un jeton
-    d'écriture distinct du jeton de lecture (variable <variable du dossier>_ECRITURE).
-  - Les factures générées sont toujours des brouillons : le mode « awaiting_validation » est imposé
-    ici, il n'est réglable nulle part.
+  - La console ne contient aucun code de modification, d'arrêt ni de suppression. Elle ne sait que
+    CRÉER : un abonnement nouveau, ou une facture nouvelle. Les données existantes ne sont jamais touchées.
+  - Tout ce qu'elle crée reste à valider dans Pennylane : les factures d'un abonnement naissent en
+    brouillon (mode « awaiting_validation » imposé ici, réglable nulle part), une facture de rappel
+    est créée avec `draft: true` imposé de même.
+  - L'écriture est désactivée par défaut. Elle exige CONSOLE_ECRITURE=oui ET un jeton d'écriture
+    distinct du jeton de lecture (nom du jeton de lecture suivi de _ECRITURE).
   - Un envoi n'a lieu que si TOUS les contrôles bloquants passent, sur des données relues à l'instant.
   - Chaque tentative est journalisée avant l'appel, avec le corps exact et son empreinte.
   - Un bail à la fois, après confirmation saisie à la main. Aucun envoi en lot.
+  - Un seul point du code émet vers Pennylane : la fonction `_poster`, en POST.
 
-État de vérification : l'appel réel n'a jamais été exécuté. Le schéma d'entrée est celui de l'OpenAPI
-fournie par le cabinet. Ce schéma permet d'imposer des FACTURES en brouillon ; il ne contient aucun
-champ demandant que l'ABONNEMENT lui-même naisse en brouillon : son statut de création est lu dans la
-réponse et affiché, à constater sur un dossier d'essai.
+État de vérification : aucun appel réel d'écriture n'a été exécuté. Les schémas d'entrée sont ceux des
+OpenAPI « Create a billing subscription » et « Create a customer invoice » fournies par le cabinet.
+Le premier ne permet pas de demander que l'ABONNEMENT lui-même naisse en brouillon : son statut de
+création est lu dans la réponse et affiché, à constater sur un environnement de test.
 """
 from __future__ import annotations
 
@@ -27,7 +29,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from . import referentiel
+from . import jetons, referentiel
 from .pennylane_api import BASE_V2
 from .rapprochement import INTERVALLE_MOIS, SituationBail, _d, _eur, _fr
 
@@ -85,8 +87,8 @@ def controler(sit: SituationBail, proposition: dict, dossier: dict, envois: list
         variable = variable_jeton_ecriture(dossier.get("variable_jeton", ""))
         c.append(Controle("Écriture activée sur ce poste", ecriture_activee(),
                           "Variable CONSOLE_ECRITURE=oui" + ("" if ecriture_activee() else " absente : la console reste en lecture seule.")))
-        c.append(Controle("Jeton d'écriture distinct du jeton de lecture", bool(variable and os.environ.get(variable)),
-                          f"Variable {variable or '(dossier sans variable de jeton)'}"))
+        c.append(Controle("Jeton d'écriture distinct du jeton de lecture", bool(jetons.lire(variable)),
+                          f"Jeton {variable or '(dossier sans nom de jeton)'}"))
         synchro = dossier.get("derniere_synchro")
         frais = bool(synchro) and maintenant - datetime.fromisoformat(synchro) <= FRAICHEUR_MAX
         c.append(Controle("État Pennylane relu depuis moins de 24 heures", frais,
@@ -163,40 +165,39 @@ def journal(cx: sqlite3.Connection, dossier: str | None = None) -> list[dict]:
     return [dict(r) for r in cx.execute(f"SELECT * FROM envois {filtre} ORDER BY id DESC", args)]
 
 
-def ouvrir_envoi(cx: sqlite3.Connection, bail: dict, proposition: dict, corps: dict, mode: str) -> int:
+def ouvrir_envoi(cx: sqlite3.Connection, bail: dict, proposition: dict, corps: dict, mode: str, nature: str = "abonnement") -> int:
     """Journalise la tentative AVANT l'appel : un envoi dont la réponse se perd laisse une trace."""
-    cur = cx.execute("""INSERT INTO envois (horodatage, dossier, bail_id, bail_code, locataire, cle, empreinte, corps, mode, etat, auteur)
-                        VALUES (?,?,?,?,?,?,?,?,?, 'en cours', ?)""",
+    cur = cx.execute("""INSERT INTO envois (horodatage, dossier, bail_id, bail_code, locataire, cle, empreinte, corps, mode, etat, auteur, nature)
+                        VALUES (?,?,?,?,?,?,?,?,?, 'en cours', ?, ?)""",
                      (datetime.now().isoformat(timespec="seconds"), bail["dossier"], bail["id"], bail["code"],
                       bail.get("locataire", ""), cle_idempotence(bail["dossier"], bail["code"], proposition["debut"]),
-                      empreinte(corps), json.dumps(corps, ensure_ascii=False, indent=2), mode, referentiel.utilisateur()))
+                      empreinte(corps), json.dumps(corps, ensure_ascii=False, indent=2), mode, referentiel.utilisateur(), nature))
     cx.commit()
     return cur.lastrowid
 
 
 def clore_envoi(cx: sqlite3.Connection, envoi_id: int, etat: str, statut_http: int | None = None,
-                subscription_id: int | None = None, statut_abonnement: str = "", reponse: str = "") -> None:
-    cx.execute("UPDATE envois SET etat=?, statut_http=?, subscription_id=?, statut_abonnement=?, reponse=? WHERE id=?",
-               (etat, statut_http, subscription_id, statut_abonnement, reponse[:4000], envoi_id))
+                subscription_id: int | None = None, statut_abonnement: str = "", reponse: str = "",
+                facture_id: int | None = None) -> None:
+    cx.execute("UPDATE envois SET etat=?, statut_http=?, subscription_id=?, statut_abonnement=?, reponse=?, facture_id=? WHERE id=?",
+               (etat, statut_http, subscription_id, statut_abonnement, reponse[:4000], facture_id, envoi_id))
     cx.commit()
 
 
 # ---------------------------------------------------------------------------
 # Envoi
 # ---------------------------------------------------------------------------
-def creer_dans_pennylane(dossier: dict, corps: dict, timeout: int = 60) -> tuple[str, int | None, dict | None, str]:
-    """POST /billing_subscriptions. Retourne (état, statut HTTP, réponse, texte brut).
+def _poster(dossier: dict, chemin: str, corps: dict, timeout: int = 60) -> tuple[str, int | None, dict | None, str]:
+    """L'unique émission de la console vers Pennylane. Retourne (état, statut HTTP, réponse, texte brut).
 
     état : « créé » (201), « refusé » (réponse d'erreur de Pennylane : rien n'a été créé),
-    « incertain » (pas de réponse : l'abonnement a pu être créé, à vérifier avant tout nouvel essai)."""
+    « incertain » (pas de réponse : l'objet a pu être créé, à vérifier avant tout nouvel essai)."""
     if not ecriture_activee():
         raise PermissionError("Écriture désactivée : CONSOLE_ECRITURE=oui est requis")
-    if corps.get("mode") != {"type": MODE_IMPOSE}:
-        raise PermissionError("Envoi refusé : seul le mode brouillon est autorisé")
-    jeton = os.environ.get(variable_jeton_ecriture(dossier.get("variable_jeton", "")), "")
+    jeton = jetons.lire(variable_jeton_ecriture(dossier.get("variable_jeton", "")))
     if not jeton:
         raise PermissionError("Jeton d'écriture absent pour ce dossier")
-    req = urllib.request.Request(f"{BASE_V2}/billing_subscriptions", data=json.dumps(corps).encode("utf-8"),
+    req = urllib.request.Request(f"{BASE_V2}{chemin}", data=json.dumps(corps).encode("utf-8"),
                                  method="POST", headers={"Authorization": f"Bearer {jeton}",
                                                          "Content-Type": "application/json", "Accept": "application/json"})
     try:
@@ -208,3 +209,72 @@ def creer_dans_pennylane(dossier: dict, corps: dict, timeout: int = 60) -> tuple
         return ("refusé" if 400 <= e.code < 500 else "incertain"), e.code, None, brut
     except Exception as e:                                  # coupure, délai dépassé : issue inconnue
         return "incertain", None, None, f"{type(e).__name__} : {e}"
+
+
+def creer_dans_pennylane(dossier: dict, corps: dict, timeout: int = 60) -> tuple[str, int | None, dict | None, str]:
+    """Crée un abonnement (POST /billing_subscriptions) dont les factures naîtront en brouillon."""
+    if corps.get("mode") != {"type": MODE_IMPOSE}:
+        raise PermissionError("Envoi refusé : seul le mode brouillon est autorisé")
+    return _poster(dossier, "/billing_subscriptions", corps, timeout)
+
+
+def creer_facture_dans_pennylane(dossier: dict, corps: dict, timeout: int = 60) -> tuple[str, int | None, dict | None, str]:
+    """Crée une facture client en brouillon (POST /customer_invoices). Jamais une facture finalisée."""
+    if corps.get("draft") is not True:
+        raise PermissionError("Envoi refusé : seule une facture en brouillon est autorisée")
+    return _poster(dossier, "/customer_invoices", corps, timeout)
+
+
+# ---------------------------------------------------------------------------
+# Contrôles d'une facture de rappel
+# ---------------------------------------------------------------------------
+def controler_rappel(sit: SituationBail, proposition: dict | None, dossier: dict, envois: list[dict], simulation: bool,
+                     existe_deja: bool | None = None, maintenant: datetime | None = None) -> list[Controle]:
+    """Contrôles préalables à la création d'une facture de rappel en brouillon.
+
+    `existe_deja` : réponse de Pennylane à « une facture porte-t-elle déjà cette référence ? » ; None si inconnue."""
+    maintenant = maintenant or datetime.now()
+    c: list[Controle] = []
+    if proposition is None:
+        return [Controle("Révision non répercutée sur un abonnement en cours", False,
+                         "Aucun rappel à facturer : il faut un abonnement en cours et une révision passée.")]
+    corps, bail = proposition["corps"], sit.bail
+    if simulation:
+        c.append(Controle("Mode simulation", True, "Aucun appel à Pennylane : l'envoi est joué dans la base locale."))
+    else:
+        variable = variable_jeton_ecriture(dossier.get("variable_jeton", ""))
+        c.append(Controle("Écriture activée sur ce poste", ecriture_activee(),
+                          "Variable CONSOLE_ECRITURE=oui" + ("" if ecriture_activee() else " absente : la console reste en lecture seule.")))
+        c.append(Controle("Jeton d'écriture distinct du jeton de lecture", bool(jetons.lire(variable)),
+                          f"Jeton {variable or '(dossier sans nom de jeton)'}"))
+        synchro = dossier.get("derniere_synchro")
+        frais = bool(synchro) and maintenant - datetime.fromisoformat(synchro) <= FRAICHEUR_MAX
+        c.append(Controle("État Pennylane relu depuis moins de 24 heures", frais, f"Dernière collecte : {synchro or 'jamais'}"))
+        c.append(Controle("Aucune facture ne porte déjà cette référence dans Pennylane", existe_deja is False,
+                          f"Référence {proposition['reference']} : " + ("absente de Pennylane." if existe_deja is False else
+                          "déjà présente, la facture existe." if existe_deja else "Pennylane n'a pas répondu, vérification impossible.")))
+    c.append(Controle("Révision non répercutée constatée", any(e.type == "REVISION_NON_REPERCUTEE" for e in sit.ecarts),
+                      f"Révision du {_fr(_d(proposition['date_revision']))}, abonnement n° {sit.courant['id'] if sit.courant else '—'} "
+                      "resté à l'ancien loyer."))
+    c.append(Controle("Client Pennylane identifié", isinstance(corps.get("customer_id"), int), f"customer_id = {corps.get('customer_id')}"))
+    c.append(Controle("Facture créée en brouillon", corps.get("draft") is True,
+                      "Brouillon imposé : la facture devra être relue et validée dans Pennylane avant tout envoi au locataire."))
+    c.append(Controle("Abonnement en cours borné : le rappel est complet", proposition["borne"],
+                      f"{proposition['echeances']} échéance(s), du {_fr(_d(proposition['du']))} au {_fr(_d(proposition['au']))}."
+                      if proposition["borne"] else
+                      "L'abonnement en cours n'a pas de terme : il continuerait à l'ancien loyer et le rappel serait incomplet. "
+                      "Le borner dans Pennylane, puis actualiser."))
+    c.append(Controle("Rappel strictement positif", proposition["echeances"] > 0 and proposition["ecart_par_echeance"] > 0,
+                      f"{proposition['echeances']} × {_eur(proposition['ecart_par_echeance'])} = {_eur(proposition['montant_ht'])} hors taxes."
+                      if proposition["ecart_par_echeance"] > 0 else
+                      "Le loyer révisé est inférieur à l'ancien : c'est un avoir qu'il faut établir, à la main dans Pennylane."))
+    c.append(Controle("Taux de TVA reconnu", proposition["tva_connue"],
+                      f"Code Pennylane {corps['invoice_lines'][0]['vat_rate']}." if proposition["tva_connue"] else
+                      f"Le taux de {bail.get('tva_pct')} % du bail n'a pas de code Pennylane connu de la console."))
+    cle = cle_idempotence(bail["dossier"], bail["code"], proposition["debut"])
+    deja = [e for e in envois if e["cle"] == cle and e["etat"] in ("créé", "en cours", "incertain")]
+    c.append(Controle("Aucun rappel déjà envoyé pour ce bail et cette révision", not deja,
+                      "Envoi n° " + ", ".join(str(e["id"]) for e in deja) + " déjà journalisé"
+                      + (" : issue incertaine, vérifier dans Pennylane." if any(e["etat"] != "créé" for e in deja) else ".")
+                      if deja else "Le journal ne contient aucun rappel pour cette révision."))
+    return c

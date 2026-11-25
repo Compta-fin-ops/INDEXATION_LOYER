@@ -147,7 +147,9 @@ CREATE TABLE IF NOT EXISTS envois (                 -- journal des créations d'
     subscription_id INTEGER,
     statut_abonnement TEXT DEFAULT '',
     reponse TEXT DEFAULT '',
-    auteur TEXT DEFAULT ''
+    auteur TEXT DEFAULT '',
+    nature TEXT DEFAULT 'abonnement',                -- abonnement | facture
+    facture_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS reglages (              -- réglages portés par la base elle-même
     cle TEXT PRIMARY KEY,
@@ -199,7 +201,7 @@ MIGRATIONS = {
              ("methode", "TEXT DEFAULT 'Chaînée'"), ("plafond_annuel_pct", "REAL"), ("duree_ans", "INTEGER"),
              ("date_sortie", "TEXT"), ("notes", "TEXT DEFAULT ''"),
              ("reprise_date", "TEXT"), ("reprise_loyer_annuel", "REAL"), ("reprise_trimestre", "TEXT")),
-    "envois": (("auteur", "TEXT DEFAULT ''"),),
+    "envois": (("auteur", "TEXT DEFAULT ''"), ("nature", "TEXT DEFAULT 'abonnement'"), ("facture_id", "INTEGER")),
 }
 
 

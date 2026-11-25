@@ -175,6 +175,16 @@ class ClientReel:
         except Exception as e:                           # réseau, délai dépassé, réponse illisible
             return None, None, f"{type(e).__name__} : {e}"[:300]
 
+    def facture_existe(self, dossier: str, reference: str) -> bool | None:
+        """Une facture porte-t-elle déjà cette référence externe ? None si Pennylane n'a pas répondu clairement.
+
+        Le filtre `external_reference` (opérateur `eq`) est celui de l'OpenAPI « List customer invoices »."""
+        filtre = json.dumps([{"field": "external_reference", "operator": "eq", "value": reference}])
+        code, corps, _ = self._lire(dossier, "/customer_invoices", {"limit": 1, "filter": filtre})
+        if code != 200 or not isinstance(corps, dict) or not isinstance(corps.get("items"), list):
+            return None
+        return bool(corps["items"])
+
     def tester_connexion(self, dossier: str) -> dict:
         """Deux lectures, aucune écriture : l'identité du jeton (GET /me), puis une page d'abonnements.
 

@@ -220,10 +220,29 @@ par échéance est le plus proche.
 | Environnement de test Pennylane (Sandbox) | Existe selon le centre d'aide : un dossier de démonstration par utilisateur, nommé « Sandbox - votre email », avec son propre jeton d'API. La console sait tester la connexion d'un dossier en lecture seule et reconnaître cette marque. **Schéma de la route d'identité non vérifié** ; aucune création n'y a encore été faite |
 | Jeton cabinet | La doc indique qu'un jeton cabinet est accepté sur l'API v2 avec l'en-tête `X-Company-Id`. Non exploité : la console utilise un jeton par dossier |
 | Appel réel à Pennylane, en lecture | Exécuté le 24/11/2026 sur un environnement de test Pennylane : la liste des abonnements a été lue et rapprochée. La liste des factures a été appelée sans erreur ; son contenu n'a pas encore été observé |
+| Facture de rappel en brouillon | Corps conforme à l'OpenAPI « Create a customer invoice » fournie par le cabinet ; parcours testé contre un faux Pennylane, 5 tests |
 | Appel réel à Pennylane, en écriture | **Jamais exécuté** |
 
 Tout ce qui parle à Pennylane en lecture est isolé dans `console/pennylane_api.py`, fonctions
 `normaliser_abonnement`, `normaliser_facture` et `_pages`. C'est le seul fichier à ajuster au premier essai réel.
+
+## Ce que la console écrit dans Pennylane
+
+Deux créations, et rien d'autre. Dans les deux cas, ce qui est créé reste à valider dans Pennylane.
+
+| Création | Quand | Ce qui naît dans Pennylane |
+|---|---|---|
+| Abonnement de la période suivante | Terme de l'abonnement en cours, ou révision à répercuter | Un abonnement dont les factures naissent en brouillon |
+| Facture de rappel | Révision non répercutée : l'abonnement est resté à l'ancien loyer | Une facture en brouillon, du montant dû depuis la date de révision |
+
+La facture de rappel couvre toutes les échéances de l'abonnement resté à l'ancien loyer, de la date de révision
+à son terme. Elle exige donc que cet abonnement soit borné : sinon il continuerait à l'ancien loyer et le rappel
+serait incomplet. Un seul rappel par bail et par révision. Elle porte une référence externe,
+`console-DOSSIER-BAIL-rappel-DATE`, que la console recherche dans Pennylane avant de créer : une facture déjà
+présente sous cette référence bloque l'envoi. Un rappel négatif, quand le loyer baisse, est refusé : c'est un
+avoir, à établir à la main.
+
+Les verrous sont les mêmes pour les deux créations, décrits ci-dessous.
 
 ## Créer un abonnement depuis la console
 
