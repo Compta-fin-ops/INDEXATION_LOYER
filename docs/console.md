@@ -48,9 +48,9 @@ de l'ancien classeur. Un test vérifie que la console retrouve, bail par bail, l
 
 | Édition | Où | Contenu |
 |---|---|---|
-| Courrier d'une révision | Page du bail, tableau « Révisions » | Un PDF : application, gel ou attente d'indice |
+| Courrier d'une révision | Page du bail, tableau « Révisions » | Un PDF : application, gel ou attente d'indice. Le calcul de l'indice, puis un tableau avant / après : loyer annuel HT, loyer, provision sur charges et TVA par échéance, montant TTC à régler. Si le montant change, un paragraphe demande d'ajuster le virement permanent |
 | Courriers en lot | Tableau de bord, « Éditer les courriers en lot » | Un ZIP d'un PDF par locataire, pour toutes les révisions à préparer ; puis la date d'envoi, posée d'un geste sur les courriers cochés |
-| Situation des loyers à ce jour | Page du dossier, bloc « Éditions » | Un PDF pour le bailleur : les nouveaux loyers connus avec l'écart annuel et deux cases « Appliquer » ou « Geler » à cocher, les révisions en attente d'indice, les autres baux. Une décision déjà saisie dans la console y figure à la place des cases |
+| Situation des loyers à ce jour | Page du dossier, bloc « Éditions », ou page « Baux » | Un PDF d'information pour le gérant, chaque ligne datée par sa date de réindexation : loyers réindexés sur douze mois (ancien et nouveau loyer, écart annuel), réindexations à venir avec indice publié, réindexations dont l'indice n'est pas publié, autres baux |
 | État annuel des révisions | Page du dossier, bloc « Éditions » | Un PDF par société et par année : pour chaque bail la révision de l'année, les indices, le coefficient, le loyer avant et après, la suite donnée, et le total |
 
 La console édite ; elle n'envoie rien. La date d'envoi d'un courrier est celle que vous posez.
@@ -117,6 +117,15 @@ La base est désormais la source de vérité. `python -m console sauvegarder` en
 `data/sauvegardes`. Les pièces jointes sont des fichiers à part, dans le dossier `pieces` à côté de la base :
 les deux sont à sauvegarder, et aucun n'est versionné.
 
+## La page « Baux »
+
+Tous les baux, regroupés par société. Chaque société se déplie d'un clic, ou toutes à la fois. En tête, les
+quatre tuiles du tableau de bord servent de filtres : à corriger, à régulariser, réindexations à préparer, en
+attente d'indice. Un clic sur une tuile ne garde que les baux concernés et déplie leur société ; un second clic
+retire le filtre. La recherche porte sur la société, le code du bail, le locataire et le local. Chaque société
+porte ses liens (fiche, modifier la société, nouveau bail, situation PDF), chaque bail les siens (voir, modifier,
+préparer l'abonnement ou le rappel quand il y a lieu).
+
 ## Le tableau de bord
 
 Il sert à deux choses et ne montre rien d'autre : pas de total de loyers ni de chiffre d'affaires.
@@ -149,6 +158,12 @@ le nombre d'occurrences de la période suivante, et affiche le corps de l'abonne
 | Facture échue non réglée | À traiter, bloquant au-delà de 60 jours |
 | Facture en brouillon depuis plus de 7 jours | À traiter |
 | Abonnement actif sans bail au référentiel | À traiter |
+| Abonnement suivant qui chevauche l'abonnement en cours, ou échéance couverte par aucun des deux | Bloquant |
+| Abonnement suivant à un autre montant que le loyer révisé | Bloquant |
+| Abonnement facturé à un autre client que celui du bail | Bloquant |
+| Abonnement actif après la sortie du locataire | Bloquant |
+| TVA des lignes de l'abonnement différente du bail | À traiter |
+| Factures de l'abonnement émises sans brouillon | Information |
 
 ## Démarrer
 
@@ -396,9 +411,10 @@ Internet demande un serveur placé derrière un accès chiffré. Il n'y a pas no
   loyer révisé à partir de l'échéance qui suit ; le prorata du mois de révision n'est pas calculé.
 - **Indice publié après la date anniversaire.** La console signale la révision échue sans indice et refuse de
   créer un abonnement à un loyer inconnu. La période provisoire à l'ancien loyer, puis le rappel, restent manuels.
-- **Plafond de hausse.** Le plafond saisi sur un bail est annuel et se compose sur les années couvertes par la
-  révision : 10 % par an laissent passer 33,1 % sur une révision triennale. Un plafond qui s'applique une fois par
-  révision, quelle que soit sa périodicité, n'est pas modélisé : un tel bail se suit par le point de reprise.
+- **Plafond de hausse.** Le plafond saisi sur un bail s'applique à chaque révision, quelle que soit sa périodicité :
+  le loyer retenu ne dépasse pas le loyer antérieur augmenté de ce pourcentage. Une révision qui rattrape un gel
+  n'est plafonnée qu'une fois. Un plafond composé année par année n'est pas modélisé.
+- **Plafonnement légal temporaire de l'ILC.** Non modélisé. Une révision concernée se saisit par le point de reprise.
 - **Bornage d'un abonnement sans terme.** La console ne modifie pas un abonnement existant. Un abonnement repris
   sans terme se borne une fois, à la main, dans Pennylane ; les suivants, créés par la console, sont bornés.
 - **Envoi d'une facture.** La console ne finalise ni n'envoie aucune facture : tout se valide dans Pennylane.

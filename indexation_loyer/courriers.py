@@ -83,11 +83,29 @@ def _periodicite_adj(p: str) -> str:
     return {"Mensuelle": "mensuel", "Trimestrielle": "trimestriel", "Semestrielle": "semestriel", "Annuelle": "annuel"}.get(p, p.lower())
 
 
+UNITE = {"Mensuelle": "mois", "Trimestrielle": "trimestre", "Semestrielle": "semestre", "Annuelle": "an"}
+MOIS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
+
+
+def montants_echeance(bail: Bail, loyer_annuel: float | None) -> dict[str, float | None]:
+    """Ce que paie le locataire à chaque échéance : loyer, provision sur charges, TVA, total TTC."""
+    if loyer_annuel is None:
+        return {"loyer": None, "charges": None, "tva": None, "ttc": None}
+    n = bail.echeances_par_an
+    loyer, charges = round(loyer_annuel / n, 2), round((bail.charges_annuelles_ht or 0) / n, 2)
+    tva = round((loyer + charges) * (bail.tva_pct or 0) / 100, 2)
+    return {"loyer": loyer, "charges": charges, "tva": tva, "ttc": round(loyer + charges + tva, 2)}
+
+
 def valeurs_courrier(societe: Societe, bail: Bail, l: calcul.LigneRevision) -> dict[str, str]:
     cfg = charger_config()["series"].get(bail.indice, {})
     n = bail.echeances_par_an
     nouveau = l.loyer_retenu if not est_gel(l.decision) else l.loyer_precedent
+    avant, apres = montants_echeance(bail, l.loyer_precedent), montants_echeance(bail, nouveau)
     return {
+        "unite": UNITE.get(bail.periodicite_facturation, "échéance"),
+        "mois_revision": f"{MOIS[l.echeance.date_revision.month - 1]} {l.echeance.date_revision.year}",
+        "total_ttc_precedent": _eur(avant["ttc"]), "total_ttc_nouveau": _eur(apres["ttc"]),
         "locataire": bail.locataire, "local": bail.local, "indice": bail.indice,
         "indice_libelle": cfg.get("libelle", bail.indice).split(" - ")[0], "idbank": cfg.get("idbank", ""),
         "trimestre_reference": l.echeance.trimestre_reference, "valeur_reference": f"{l.indice_reference:g}".replace(".", ",") if l.indice_reference else "non publié",
@@ -176,23 +194,38 @@ def generer_un(societe: Societe, bail: Bail, l: calcul.LigneRevision, chemin: Pa
         el.append(Paragraph(ptxt.format(**v), st["base"]))
 
     if not attente:
-        lignes_tab = [["", "Indice / loyer"],
-                      [f"Indice {v['indice']} de référence ({v['trimestre_reference']})", v["valeur_reference"]],
-                      [f"Indice {v['indice']} précédent ({v['trimestre_precedent']})", v["valeur_precedente"]],
-                      ["Coefficient", v["coefficient"]],
-                      ["Loyer annuel HT avant révision", v["loyer_precedent_annuel"]],
-                      ["Loyer annuel HT " + ("maintenu" if gel else "révisé"), v["loyer_nouveau_annuel"]],
-                      [f"Loyer {v['periodicite']} HT", v["loyer_nouveau_echeance"]]]
-        if not gel:
-            lignes_tab.append(["Variation", v["variation_pct"]])
-        t = Table(lignes_tab, colWidths=[105 * mm, 45 * mm], hAlign="LEFT")
-        t.setStyle(TableStyle([
-            ("FONT", (0, 0), (-1, -1), "Helvetica", 9.5), ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 9.5),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9E1F2")), ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#BFBFBF")), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ]))
-        el += [Spacer(1, 2 * mm), t, Spacer(1, 5 * mm)]
+        cadre = lambda t, entete=True: t.setStyle(TableStyle([
+            ("FONT", (0, 0), (-1, -1), "Helvetica", 9.5), *([("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 9.5),
+                                                             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9E1F2"))] if entete else []),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#BFBFBF")),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3), ("TOPPADDING", (0, 0), (-1, -1), 3)]))
+        # 1. le calcul de l'indice
+        calc = [[f"Indice {v['indice']} du {v['trimestre_reference']}", v["valeur_reference"]],
+                [f"Indice {v['indice']} du {v['trimestre_precedent']}", v["valeur_precedente"]],
+                ["Variation de l'indice", f"{(l.coefficient - 1) * 100:+.2f} %".replace(".", ",") if l.coefficient else "—"]]
+        t = Table(calc, colWidths=[105 * mm, 45 * mm], hAlign="LEFT")
+        cadre(t, entete=False)
+        el += [Spacer(1, 1 * mm), t, Spacer(1, 4 * mm)]
+        # 2. ce qui change pour le locataire : annuel, puis chaque échéance, jusqu'au montant TTC à régler
+        u = v["unite"]
+        avant, apres = montants_echeance(bail, l.loyer_precedent), montants_echeance(bail, l.loyer_precedent if gel else l.loyer_retenu)
+        titre_col = ParagraphStyle("tc", parent=st["base"], fontName="Helvetica-Bold", fontSize=9.5, leading=11, alignment=TA_RIGHT, spaceAfter=0)
+        tab = [["", Paragraph("Avant<br/>la révision", titre_col),
+                Paragraph("Maintenu" if gel else "À compter de<br/>" + v["mois_revision"], titre_col)],
+               ["Loyer annuel hors taxes", v["loyer_precedent_annuel"], v["loyer_nouveau_annuel"]],
+               [f"Loyer hors taxes, par {u}", _eur(avant["loyer"]), _eur(apres["loyer"])]]
+        if bail.charges_annuelles_ht:
+            tab.append([f"Provision sur charges hors taxes, par {u}", _eur(avant["charges"]), _eur(apres["charges"])])
+        tab += [[f"TVA à {bail.tva_pct:g} %, par {u}".replace(".", ","), _eur(avant["tva"]), _eur(apres["tva"])],
+                [f"Montant à régler TTC, par {u}", _eur(avant["ttc"]), _eur(apres["ttc"])]]
+        t = Table(tab, colWidths=[72 * mm, 38 * mm, 46 * mm], hAlign="LEFT")
+        cadre(t)
+        t.setStyle(TableStyle([("FONT", (0, -1), (-1, -1), "Helvetica-Bold", 9.5),
+                               ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#F2F2F2"))]))
+        el += [t, Spacer(1, 5 * mm)]
+        if not gel and avant["ttc"] != apres["ttc"] and modele.get("virement"):
+            suite = modele.get("rappel_baisse" if apres["ttc"] < avant["ttc"] else "rappel_hausse", "")
+            el.append(Paragraph((modele["virement"] + (" " + suite if suite else "")).format(**v), st["base"]))
     el += [Paragraph(modele["cloture"], st["base"]), Spacer(1, 8 * mm),
            Paragraph(f"{v['signataire']}<br/>{v['qualite']}, {societe.nom}", st["droite"])]
     chemin.parent.mkdir(parents=True, exist_ok=True)
