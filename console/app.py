@@ -820,6 +820,31 @@ def creer_app(chemin_db: Path | str = db.CHEMIN_DEFAUT, aujourdhui: date | None 
         return Response(contenu, media_type="application/pdf", headers={
             "Content-Disposition": f'inline; filename="{code}_revisions_{annee}.pdf"'})
 
+    @app.get("/baux/{bail_id}/releve.pdf")
+    def releve_pdf(bail_id: int, courrier: int = 0, depuis: str = ""):
+        """Relevé des factures du bail depuis une date (douze mois par défaut), seul ou précédé du courrier de régularisation."""
+        b = ligne_bail(bail_id)
+        a = analyses(b["dossier"])[0]
+        sit = next(x for x in a["situations"] if x.bail["id"] == bail_id)
+        try:
+            debut = date.fromisoformat(depuis) if depuis else date(jour().year - 1, jour().month, 1)
+        except ValueError:
+            raise HTTPException(400, "Date de début illisible.")
+        lignes = editions.lignes_releve(sit.factures, debut)
+        if not lignes:
+            raise HTTPException(404, "Aucune facture émise sur la période.")
+        n = rp.ECHEANCES_PAR_AN.get(sit.bail.get("periodicite"), 12)
+        ht = round(sit.attendu_annuel / n, 2)
+        attendu = round(ht + ht * (sit.bail.get("tva_pct") or 0) / 100, 2) if sit.bail.get("calcule") else None
+        d = dossier_ou_404(b["dossier"])
+        contenu = editions.releve(d, sit.bail, lignes, debut, jour(), courrier=bool(courrier), attendu_ttc=attendu,
+                                  unite=rp.UNITE.get(sit.bail.get("periodicite"), "échéance"), fictif=d["source_referentiel"] == FICTIF)
+        referentiel.tracer(cx, "Courrier de régularisation édité" if courrier else "Relevé des factures édité",
+                           f"depuis le {debut:%d/%m/%Y}, solde {sum(l['reste'] for l in lignes):.2f} € TTC", b["dossier"], bail_id)
+        cx.commit()
+        return Response(contenu, media_type="application/pdf", headers={
+            "Content-Disposition": f'inline; filename="{b["dossier"]}_{b["code"]}_{"regularisation" if courrier else "releve"}_{jour():%Y-%m-%d}.pdf"'})
+
     @app.post("/baux/{bail_id}/pieces")
     async def piece_deposer(request: Request, bail_id: int):
         b = ligne_bail(bail_id)

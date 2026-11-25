@@ -262,3 +262,90 @@ def situation_loyers(societe: dict, groupes: dict[str, list[dict]], aujourdhui: 
         canvas.restoreState()
     doc.build(el, onFirstPage=pied, onLaterPages=pied)
     return tampon.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Relevé des factures d'un bail, et courrier de demande de régularisation
+# ---------------------------------------------------------------------------
+STATUTS_RELEVE = {"paid": "Payée", "late": "En retard", "upcoming": "À échoir", "partially_paid": "Partiellement payée",
+                  "unpaid": "Non payée"}
+HORS_RELEVE = ("draft", "cancelled", "credit_note", "proforma", "shipping_order", "purchasing_order",
+               "estimate_pending", "estimate_accepted", "estimate_invoiced", "estimate_denied")
+
+
+def lignes_releve(factures: list[dict], depuis: date) -> list[dict]:
+    """Factures émises depuis `depuis`, de la plus ancienne à la plus récente. Brouillons, avoirs, devis et factures
+    annulées sont écartés : le signe des montants d'un avoir n'a pas été vérifié."""
+    sortie = []
+    for f in factures:
+        d = date.fromisoformat(str(f["date"])[:10]) if f.get("date") else None
+        if d is None or d < depuis or f.get("statut") in HORS_RELEVE:
+            continue
+        ttc, reste = f.get("montant_ttc") or 0.0, f.get("restant_du") or 0.0
+        sortie.append({"date": d, "numero": f.get("numero") or "", "origine": f.get("origine") or "",
+                       "echeance": date.fromisoformat(str(f["echeance"])[:10]) if f.get("echeance") else None,
+                       "ttc": ttc, "regle": round(ttc - reste, 2), "reste": reste,
+                       "statut": STATUTS_RELEVE.get(f.get("statut"), f.get("statut") or "")})
+    return sorted(sortie, key=lambda x: (x["date"], x["numero"]))
+
+
+def releve(societe: dict, bail: dict, lignes: list[dict], depuis: date, aujourdhui: date, courrier: bool = False,
+           attendu_ttc: float | None = None, unite: str = "mois", fictif: bool = False) -> bytes:
+    """PDF : relevé des factures du bail ; précédé, si `courrier`, d'une demande cordiale de régularisation."""
+    ss = getSampleStyleSheet()
+    base = ParagraphStyle("b", parent=ss["Normal"], fontName="Helvetica", fontSize=10, leading=13.5, spaceAfter=6)
+    petit = ParagraphStyle("p", parent=base, fontSize=8, leading=10, textColor=colors.grey, spaceAfter=0)
+    cell = ParagraphStyle("c", parent=base, fontSize=8.5, leading=10.5, spaceAfter=0)
+    droite = ParagraphStyle("d", parent=base, alignment=2)
+    titre = ParagraphStyle("t", parent=base, fontName="Helvetica-Bold", fontSize=12, leading=15, spaceBefore=4, spaceAfter=8)
+    total_du = round(sum(l["reste"] for l in lignes), 2)
+    nl = lambda t: (t or "").replace("\n", "<br/>")
+    tampon = io.BytesIO()
+    doc = SimpleDocTemplate(tampon, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=18 * mm, bottomMargin=18 * mm,
+                            title=f"Relevé – {bail.get('locataire', '')}", author=societe["nom"])
+    el = []
+    if fictif:
+        el.append(Paragraph("DOCUMENT DE DÉMONSTRATION – VALEURS FICTIVES",
+                            ParagraphStyle("f", parent=base, textColor=colors.red, fontName="Helvetica-Bold", alignment=1)))
+    el += [Paragraph(f"<b>{societe['nom']}</b>" + (f"<br/>{nl(societe.get('adresse'))}" if societe.get("adresse") else ""), base),
+           Spacer(1, 6 * mm),
+           Paragraph(f"<b>{bail.get('locataire', '')}</b>" + (f"<br/>{nl(bail.get('adresse_locataire'))}" if bail.get("adresse_locataire") else ""), droite),
+           Spacer(1, 4 * mm),
+           Paragraph(f"{societe.get('ville_signature') + ', ' if societe.get('ville_signature') else ''}le {aujourdhui:%d/%m/%Y}", droite)]
+    if courrier:
+        el += [Paragraph(f"<b>Objet : relevé de compte – {bail.get('local', '')}</b>", base), Spacer(1, 2 * mm),
+               Paragraph("Madame, Monsieur,", base),
+               Paragraph(f"Vous trouverez ci-dessous le relevé des factures émises depuis le {depuis:%d/%m/%Y} au titre du bail des locaux "
+                         f"désignés ci-dessus. Sauf erreur ou omission de notre part, il fait apparaître au {aujourdhui:%d/%m/%Y} "
+                         f"un solde restant dû de <b>{_eur(total_du)}</b> toutes taxes comprises.", base)]
+        if attendu_ttc is not None:
+            el.append(Paragraph(f"Ce solde peut provenir d'un virement permanent dont le montant n'a pas suivi la dernière révision du loyer. "
+                                f"Le montant de chaque échéance est aujourd'hui de <b>{_eur(attendu_ttc)}</b> toutes taxes comprises par {unite}.", base))
+        el += [Paragraph("Nous vous remercions de bien vouloir procéder à la régularisation de ce solde et, le cas échéant, d'ajuster le montant "
+                         "de votre virement. Si un règlement est intervenu entre-temps, nous vous prions de ne pas tenir compte de ce courrier.", base),
+               Paragraph("Nous restons à votre disposition pour tout renseignement et vous prions d'agréer, Madame, Monsieur, "
+                         "l'expression de nos salutations distinguées.", base), Spacer(1, 6 * mm),
+               Paragraph(f"{societe.get('signataire') or societe['nom']}<br/>{societe.get('qualite_signataire') or ''}, {societe['nom']}", droite),
+               Spacer(1, 6 * mm)]
+    el.append(Paragraph(f"Relevé des factures du {depuis:%d/%m/%Y} au {aujourdhui:%d/%m/%Y}", titre))
+    el.append(Paragraph(f"Bail {bail.get('code', '')} · {bail.get('local', '')}", petit))
+    el.append(Spacer(1, 3 * mm))
+    corps = [[Paragraph(f"<b>{t}</b>", cell) for t in ("Date", "Facture", "Échéance", "Montant TTC", "Réglé", "Reste dû", "Statut")]]
+    for l in lignes:
+        corps.append([Paragraph(f"{l['date']:%d/%m/%Y}", cell), Paragraph(l["numero"] or "—", cell),
+                      Paragraph(f"{l['echeance']:%d/%m/%Y}" if l["echeance"] else "—", cell),
+                      Paragraph(_eur(l["ttc"]), ParagraphStyle("cd", parent=cell, alignment=2)),
+                      Paragraph(_eur(l["regle"]), ParagraphStyle("cd", parent=cell, alignment=2)),
+                      Paragraph(f"<b>{_eur(l['reste'])}</b>" if l["reste"] > 0.005 else _eur(l["reste"]), ParagraphStyle("cd", parent=cell, alignment=2)),
+                      Paragraph(l["statut"], cell)])
+    corps.append([Paragraph("<b>Total</b>", cell), "", "", Paragraph(f"<b>{_eur(round(sum(l['ttc'] for l in lignes), 2))}</b>", ParagraphStyle("cd", parent=cell, alignment=2)),
+                  Paragraph(f"<b>{_eur(round(sum(l['regle'] for l in lignes), 2))}</b>", ParagraphStyle("cd", parent=cell, alignment=2)),
+                  Paragraph(f"<b>{_eur(total_du)}</b>", ParagraphStyle("cd", parent=cell, alignment=2)), ""])
+    t = Table(corps, colWidths=[20 * mm, 30 * mm, 20 * mm, 26 * mm, 24 * mm, 24 * mm, 26 * mm], repeatRows=1)
+    t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9E1F2")), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                           ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor("#BFBFBF")),
+                           ("LINEABOVE", (0, -1), (-1, -1), 0.8, colors.black)]))
+    el += [t, Spacer(1, 4 * mm),
+           Paragraph("Montants toutes taxes comprises. Règlements tels qu'enregistrés en comptabilité à la date du relevé.", petit)]
+    doc.build(el)
+    return tampon.getvalue()

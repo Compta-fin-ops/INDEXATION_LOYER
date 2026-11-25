@@ -273,3 +273,31 @@ def test_avertissement_jour_de_facturation_et_revision():
     jour = controles["Jour de facturation calé sur la date de révision"]
     assert not jour.ok and not jour.bloquant and "L'échéance du 30/11/2026 reste à l'ancien loyer" in jour.detail
     assert not controles["Jour de facturation présent dans tous les mois"].ok
+
+
+def test_releve_et_courrier_de_regularisation(tmp_path):
+    from console import editions
+    factures = [_facture(id=1, date="2025-10-01", montant_ttc=100.0, restant_du=0.0),
+                _facture(id=2, date="2026-10-01", numero="F-2", echeance="2026-10-10", montant_ttc=1380.0, restant_du=0.0, statut="paid"),
+                _facture(id=3, date="2026-11-01", numero="F-3", echeance="2026-11-10", montant_ttc=1380.0, restant_du=80.0, statut="late"),
+                _facture(id=4, date="2026-11-02", montant_ttc=500.0, restant_du=500.0, statut="draft"),
+                _facture(id=5, date="2026-11-03", montant_ttc=-50.0, restant_du=0.0, statut="credit_note")]
+    lignes = editions.lignes_releve(factures, date(2025, 12, 1))
+    assert [l["numero"] for l in lignes] == ["F-2", "F-3"] and lignes[1]["regle"] == 1300.0 and lignes[1]["statut"] == "En retard"
+    pdf = editions.releve({"nom": "SCI"}, {"code": "B01", "locataire": "X", "local": "L"}, lignes, date(2025, 12, 1), AUJ,
+                          courrier=True, attendu_ttc=1380.0)
+    assert pdf.startswith(b"%PDF")
+    # depuis la page du bail : un bail du portefeuille fictif avec une facture impayée
+    chemin = tmp_path / "demo.sqlite"
+    simulation.charger_demo(db.connecter(chemin), AUJ)
+    c = client_connecte(creer_app(chemin, AUJ), chemin, "lecture")
+    cx = db.connecter(chemin)
+    impayes = [e for x in depot.charger(cx, aujourdhui=AUJ)
+               for e in rp.analyser_dossier(x["dossier"], x["baux"], x["abonnements"], x["factures"], AUJ)["ecarts"] if e.type == "IMPAYE"]
+    bail_id = impayes[0].bail_id
+    page = c.get(f"/baux/{bail_id}").text
+    assert "Courrier de demande de régularisation" in page and "non lettré" in page
+    r = c.get(f"/baux/{bail_id}/releve.pdf?courrier=1")
+    assert r.status_code == 200 and r.content.startswith(b"%PDF") and "regularisation" in r.headers["content-disposition"]
+    assert c.get(f"/baux/{bail_id}/releve.pdf?depuis=n-importe").status_code == 400
+    assert c.get(f"/baux/{bail_id}/releve.pdf?depuis=2030-01-01").status_code == 404

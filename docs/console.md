@@ -51,6 +51,8 @@ de l'ancien classeur. Un test vérifie que la console retrouve, bail par bail, l
 | Courrier d'une révision | Page du bail, tableau « Révisions » | Un PDF : application, gel ou attente d'indice. Le calcul de l'indice, puis un tableau avant / après : loyer annuel HT, loyer, provision sur charges et TVA par échéance, montant TTC à régler. Si le montant change, un paragraphe demande d'ajuster le virement permanent |
 | Courriers en lot | Tableau de bord, « Éditer les courriers en lot » | Un ZIP d'un PDF par locataire, pour toutes les révisions à préparer ; puis la date d'envoi, posée d'un geste sur les courriers cochés |
 | Situation des loyers à ce jour | Page du dossier, bloc « Éditions », ou page « Baux » | Un PDF d'information pour le gérant, chaque ligne datée par sa date de réindexation : loyers réindexés sur douze mois (ancien et nouveau loyer, écart annuel), réindexations à venir avec indice publié, réindexations dont l'indice n'est pas publié, autres baux |
+| Relevé des factures d'un bail | Page du bail, bloc « Dernières factures » | Un PDF : les factures émises sur douze mois, montant TTC, réglé, reste dû, total. Brouillons, avoirs et devis écartés |
+| Courrier de demande de régularisation | Page du bail, quand un solde reste dû | Le relevé, précédé d'une lettre cordiale : solde dû, montant TTC actuel de l'échéance pour ajuster un virement permanent. Le reste dû est celui de Pennylane : lettrer avant d'envoyer |
 | État annuel des révisions | Page du dossier, bloc « Éditions » | Un PDF par société et par année : pour chaque bail la révision de l'année, les indices, le coefficient, le loyer avant et après, la suite donnée, et le total |
 
 La console édite ; elle n'envoie rien. La date d'envoi d'un courrier est celle que vous posez.
